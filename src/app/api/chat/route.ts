@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
           model: "gemini-2.5-flash",
           tools: [
             {
-              functionDeclarations: financeTools,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              functionDeclarations: financeTools as any,
             },
           ],
           systemInstruction: SYSTEM_PROMPT,
@@ -70,12 +71,14 @@ export async function POST(req: NextRequest) {
         let continueLoop = true;
 
         while (continueLoop) {
+          const lastPart = conversationHistory[conversationHistory.length - 1].parts[0];
           const response = await chat.sendMessage(
-            conversationHistory[conversationHistory.length - 1].parts[0]
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            lastPart as any
           );
 
-          const functionCalls = response.response
-            .functionCalls()
+          const functionCalls = (response.response
+            .functionCalls() ?? [])
             .filter((fc) => fc);
 
           if (functionCalls.length > 0) {
@@ -110,11 +113,13 @@ export async function POST(req: NextRequest) {
             // Envia os resultados de volta para Gemini continuar a conversa
             conversationHistory.push({
               role: "model" as const,
-              parts: response.response.content.parts,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              parts: (response.response.candidates?.[0]?.content?.parts ?? []) as any,
             });
             conversationHistory.push({
               role: "user" as const,
-              parts: functionResults,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              parts: functionResults as any,
             });
           } else {
             // Resposta final — transmite em chunks

@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import type { FunctionDeclaration } from "@google/generative-ai";
 import { db } from "@/db";
 import { transactions, budgets, goals, alerts } from "@/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
@@ -8,34 +9,35 @@ export const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
 // ─── Tool Definitions (Gemini format) ──────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const financeTools = [
   {
     name: "query_transactions",
     description:
       "Consulta transações financeiras do banco de dados. Use para responder perguntas sobre gastos, receitas e histórico financeiro.",
     parameters: {
-      type: "OBJECT",
+      type: SchemaType.OBJECT,
       properties: {
         month: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description: "Mês no formato 'jan/26', 'dez/25', etc. Opcional.",
         },
         category: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description: "Categoria como 'Transporte', 'Alimentação'. Opcional.",
         },
         type: {
-          type: "STRING",
+          type: SchemaType.STRING,
           enum: ["receita", "despesa"],
           description: "Filtrar por tipo. Opcional.",
         },
         groupBy: {
-          type: "STRING",
+          type: SchemaType.STRING,
           enum: ["category", "beneficiary", "month", "none"],
           description: "Agrupar resultados. Default: 'none'.",
         },
         limit: {
-          type: "INTEGER",
+          type: SchemaType.INTEGER,
           description: "Máximo de resultados (default: 20).",
         },
       },
@@ -46,10 +48,10 @@ export const financeTools = [
     description:
       "Retorna o resumo financeiro mensal: receitas, despesas, saldo e taxa de poupança.",
     parameters: {
-      type: "OBJECT",
+      type: SchemaType.OBJECT,
       properties: {
         month: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description:
             "Mês específico no formato 'jan/26'. Se omitido, retorna todos os meses.",
         },
@@ -61,14 +63,14 @@ export const financeTools = [
     description:
       "Retorna o status dos orçamentos por categoria: quanto foi definido e quanto foi gasto.",
     parameters: {
-      type: "OBJECT",
+      type: SchemaType.OBJECT,
       properties: {
         month: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description: "Mês no formato 'jan/26'. Opcional.",
         },
         category: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description: "Categoria específica. Opcional.",
         },
       },
@@ -79,10 +81,10 @@ export const financeTools = [
     description:
       "Retorna as metas financeiras com progresso atual.",
     parameters: {
-      type: "OBJECT",
+      type: SchemaType.OBJECT,
       properties: {
         status: {
-          type: "STRING",
+          type: SchemaType.STRING,
           enum: ["active", "completed", "paused"],
           description: "Filtrar por status. Opcional.",
         },
@@ -94,31 +96,31 @@ export const financeTools = [
     description:
       "Cria uma especificação de gráfico para ser renderizado no chat. Use quando o usuário pedir visualizações ou quando dados ficam mais claros em formato visual.",
     parameters: {
-      type: "OBJECT",
+      type: SchemaType.OBJECT,
       properties: {
         type: {
-          type: "STRING",
+          type: SchemaType.STRING,
           enum: ["bar", "line", "pie", "area"],
           description: "Tipo do gráfico.",
         },
         title: {
-          type: "STRING",
+          type: SchemaType.STRING,
           description: "Título do gráfico.",
         },
         data: {
-          type: "ARRAY",
+          type: SchemaType.ARRAY,
           items: {
-            type: "OBJECT",
+            type: SchemaType.OBJECT,
             properties: {
-              name: { type: "STRING" },
-              value: { type: "NUMBER" },
+              name: { type: SchemaType.STRING },
+              value: { type: SchemaType.NUMBER },
             },
           },
           description: "Array de objetos com os dados do gráfico.",
         },
-        xKey: { type: "STRING", description: "Chave do eixo X." },
-        yKey: { type: "STRING", description: "Chave do eixo Y." },
-        color: { type: "STRING", description: "Cor principal (hex)." },
+        xKey: { type: SchemaType.STRING, description: "Chave do eixo X." },
+        yKey: { type: SchemaType.STRING, description: "Chave do eixo Y." },
+        color: { type: SchemaType.STRING, description: "Cor principal (hex)." },
       },
       required: ["type", "title", "data", "xKey", "yKey"],
     },
@@ -289,8 +291,8 @@ export async function executeTool(
           Number(b.spentAmount) > Number(b.limitAmount)
             ? "exceeded"
             : Number(b.spentAmount) / Number(b.limitAmount) > 0.8
-            ? "warning"
-            : "ok",
+              ? "warning"
+              : "ok",
       }));
       return { result: withPct };
     }
@@ -308,15 +310,15 @@ export async function executeTool(
         ...g,
         pctComplete: g.targetAmount
           ? Math.round(
-              (Number(g.currentAmount) / Number(g.targetAmount)) * 100
-            )
+            (Number(g.currentAmount) / Number(g.targetAmount)) * 100
+          )
           : 0,
       }));
       return { result: withPct };
     }
 
     case "create_chart": {
-      const chartSpec = input as ChartSpec;
+      const chartSpec = input as unknown as ChartSpec;
       return { result: "Gráfico criado com sucesso.", chartSpec };
     }
 

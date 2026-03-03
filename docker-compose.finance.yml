@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  finance-app:
+    build: .
+    restart: always
+    networks:
+      - root_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.finance.rule=Host(`finance.elytraai.com.br`)"
+      - "traefik.http.routers.finance.entrypoints=websecure"
+      - "traefik.http.routers.finance.tls=true"
+      - "traefik.http.routers.finance.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.finance.loadbalancer.server.port=3000"
+
+networks:
+  root_default:
+    external: true

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import {
     MessageSquare,
     LayoutDashboard,
@@ -14,6 +15,7 @@ import {
     Settings,
     Plus,
     Diamond,
+    LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -29,6 +31,10 @@ const navItems = [
 export function Sidebar() {
     const pathname = usePathname();
     const [alertCount, setAlertCount] = useState(0);
+    const { data: session } = useSession();
+
+    const userName = session?.user?.name || "Usuário";
+    const userInitial = userName[0]?.toUpperCase() || "U";
 
     useEffect(() => {
         fetch("/api/alerts")
@@ -136,6 +142,22 @@ export function Sidebar() {
                     <Settings size={16} />
                     <span>Configurações</span>
                 </button>
+                <button
+                    onClick={() => signOut({ callbackUrl: "/login" })}
+                    className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] w-full transition-colors cursor-pointer"
+                    style={{ color: "var(--text-muted)" }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "var(--bg-elevated)";
+                        e.currentTarget.style.color = "var(--accent-red)";
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                        e.currentTarget.style.color = "var(--text-muted)";
+                    }}
+                >
+                    <LogOut size={16} />
+                    <span>Sair</span>
+                </button>
                 <div
                     className="flex items-center gap-2.5 px-3 py-[7px] text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
@@ -148,9 +170,9 @@ export function Sidebar() {
                             border: "1px solid var(--border)",
                         }}
                     >
-                        L
+                        {userInitial}
                     </div>
-                    <span>Leo</span>
+                    <span>{userName}</span>
                 </div>
             </div>
         </aside>

@@ -19,18 +19,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Busca histórico de mensagens (últimas 20)
-    const history = await db
-      .select()
-      .from(chatMessages)
-      .orderBy(desc(chatMessages.createdAt))
-      .limit(20);
-
-    // Salva a mensagem do usuário
-    await db.insert(chatMessages).values({
-      role: "user",
-      content: message,
-    });
+    // Busca histórico de mensagens — se falhar, usa histórico vazio
+    let history: typeof chatMessages.$inferSelect[] = [];
+    try {
+      history = await db
+        .select()
+        .from(chatMessages)
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(20);
+    } catch (dbErr) {
+      console.error("Chat: falha ao buscar histórico:", dbErr);
+      // Continua sem histórico — não bloqueia o stream
+    }
 
     const encoder = new TextEncoder();
     const stream = new TransformStream();
@@ -42,6 +42,16 @@ export async function POST(req: NextRequest) {
       let chartSpec: ChartSpec | undefined;
 
       try {
+        // Salva a mensagem do usuário (dentro do background — não bloqueia o stream)
+        try {
+          await db.insert(chatMessages).values({
+            role: "user",
+            content: message,
+          });
+        } catch (dbErr) {
+          console.error("Chat: falha ao salvar mensagem do usuário:", dbErr);
+        }
+
         const model = genai.getGenerativeModel({
           model: "gemini-2.5-flash",
           tools: [
@@ -155,11 +165,15 @@ export async function POST(req: NextRequest) {
         }
 
         // Salva resposta do assistente no histórico
-        await db.insert(chatMessages).values({
-          role: "assistant",
-          content: fullResponse,
-          chartSpec: chartSpec ?? null,
-        });
+        try {
+          await db.insert(chatMessages).values({
+            role: "assistant",
+            content: fullResponse,
+            chartSpec: chartSpec ?? null,
+          });
+        } catch (dbErr) {
+          console.error("Chat: falha ao salvar resposta do assistente:", dbErr);
+        }
 
         // Sinaliza fim do stream
         await writer.write(
@@ -200,13 +214,20 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   // Retorna histórico de mensagens
-  const history = await db
-    .select()
-    .from(chatMessages)
-    .orderBy(desc(chatMessages.createdAt))
-    .limit(50);
+  try {
+    const history = await db
+      .select()
+      .from(chatMessages)
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(50);
 
-  return new Response(JSON.stringify(history.reverse()), {
-    headers: { "Content-Type": "application/json" },
-  });
+    return new Response(JSON.stringify(history.reverse()), {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("Chat GET error:", err);
+    return new Response(JSON.stringify([]), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }

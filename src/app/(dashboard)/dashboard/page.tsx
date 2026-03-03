@@ -35,13 +35,15 @@ export default function DashboardPage() {
     const [month, setMonth] = useState(getCurrentMonth);
     const [data, setData] = useState<DashboardData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
 
     useEffect(() => {
         setLoading(true);
+        setError(false);
         fetch(`/api/dashboard/summary?month=${month}`)
-            .then((r) => r.json())
+            .then((r) => { if (!r.ok) throw new Error('fetch failed'); return r.json(); })
             .then((d) => { setData(d); setLoading(false); })
-            .catch(() => setLoading(false));
+            .catch(() => { setError(true); setLoading(false); });
     }, [month]);
 
     const taxaPoupanca = data && data.summary.receitas > 0
@@ -74,7 +76,25 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-center h-[400px]">
                     <span className="text-body" style={{ color: "var(--text-muted)" }}>Carregando...</span>
                 </div>
-            ) : data ? (
+            ) : error || !data ? (
+                <div className="flex flex-col items-center justify-center h-[400px] gap-3">
+                    <p className="text-h3" style={{ color: "var(--text-primary)" }}>
+                        {error ? "Erro ao carregar dados" : "Nenhum dado disponível"}
+                    </p>
+                    <p className="text-caption" style={{ color: "var(--text-muted)" }}>
+                        {error ? "Não foi possível se conectar ao servidor. Tente novamente." : "Importe transações para começar."}
+                    </p>
+                    {error && (
+                        <button
+                            onClick={() => setMonth(m => m)}
+                            className="px-4 py-2 rounded-[6px] text-[13px] font-medium cursor-pointer"
+                            style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                        >
+                            Tentar novamente
+                        </button>
+                    )}
+                </div>
+            ) : (
                 <>
                     {/* Row 1: KPI Cards */}
                     <div className="grid grid-cols-4 gap-4 mb-6">
@@ -116,7 +136,7 @@ export default function DashboardPage() {
                                 spec={{
                                     type: "area",
                                     title: "Evolução — Últimos 6 meses",
-                                    data: data.trend.map((t) => ({ name: t.month, receitas: t.receitas, despesas: t.despesas, value: t.receitas })),
+                                    data: (data.trend ?? []).map((t) => ({ name: t.month, receitas: t.receitas, despesas: t.despesas, value: t.receitas })),
                                     xKey: "name",
                                     yKey: "value",
                                     series: [
@@ -131,7 +151,7 @@ export default function DashboardPage() {
                                 spec={{
                                     type: "pie",
                                     title: "Gastos por Categoria",
-                                    data: data.categoryBreakdown.slice(0, 5).map((c) => ({
+                                    data: (data.categoryBreakdown ?? []).slice(0, 5).map((c) => ({
                                         name: c.category,
                                         value: c.total,
                                     })),
@@ -148,8 +168,8 @@ export default function DashboardPage() {
                             <h3 className="text-h3 mb-4" style={{ color: "var(--text-primary)" }}>
                                 Orçamentos do Mês
                             </h3>
-                            {data.budgets.length > 0 ? (
-                                data.budgets.map((b) => (
+                            {(data.budgets ?? []).length > 0 ? (
+                                (data.budgets ?? []).map((b) => (
                                     <BudgetMini key={b.category} category={b.category} spent={b.spent} limit={b.limit} />
                                 ))
                             ) : (
@@ -162,8 +182,8 @@ export default function DashboardPage() {
                             <h3 className="text-h3 mb-4" style={{ color: "var(--text-primary)" }}>
                                 Metas Ativas
                             </h3>
-                            {data.goals.filter((g) => g.status === "active").length > 0 ? (
-                                data.goals
+                            {(data.goals ?? []).filter((g) => g.status === "active").length > 0 ? (
+                                (data.goals ?? [])
                                     .filter((g) => g.status === "active")
                                     .map((g) => (
                                         <GoalMini key={g.id} name={g.name} current={g.current} target={g.target} deadline={g.deadline || undefined} />
@@ -178,7 +198,7 @@ export default function DashboardPage() {
 
                     {/* Row 4: Insights */}
                     <div className="grid grid-cols-3 gap-4 mb-6">
-                        {data.insights.map((insight, i) => (
+                        {(data.insights ?? []).map((insight, i) => (
                             <InsightCard
                                 key={i}
                                 icon={insight.icon}
@@ -214,7 +234,7 @@ export default function DashboardPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {data.recentTransactions.map((tx) => {
+                                {(data.recentTransactions ?? []).map((tx) => {
                                     const isIncome = tx.type === "receita";
                                     const catColor = getCategoryColor(tx.category);
                                     return (
@@ -243,7 +263,7 @@ export default function DashboardPage() {
                         </table>
                     </div>
                 </>
-            ) : null}
+            )}
         </div>
     );
 }

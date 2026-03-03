@@ -19,6 +19,6 @@ export default auth((req) => {
 });
 
 export const config = {
-  // Aplica o middleware em todas as rotas exceto arquivos estáticos
+  // Aplica o proxy em todas as rotas exceto arquivos estáticos
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.png$|.*\\.svg$).*)"],
 };

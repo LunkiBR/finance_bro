@@ -5,6 +5,7 @@ import {
   date,
   numeric,
   integer,
+  serial,
   jsonb,
   timestamp,
   pgEnum,
@@ -46,6 +47,7 @@ export const transactions = pgTable("transactions", {
   description: text("description").notNull(),
   beneficiary: text("beneficiary").notNull().default(""),
   category: text("category").notNull().default("Outros"),
+  subcategory: text("subcategory"),
   type: transactionTypeEnum("type").notNull(),
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
   source: text("source").notNull().default("nubank_cc"),
@@ -136,6 +138,27 @@ export const userProfile = pgTable("user_profile", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ─── Mapeamento de Favorecidos (cache da IA) ──────────────────────────────────
+
+export const payeeMappings = pgTable("payee_mappings", {
+  id: serial("id").primaryKey(),
+  beneficiaryNormalized: text("beneficiary_normalized").unique().notNull(),
+  beneficiaryDisplay: text("beneficiary_display"),
+  category: text("category").notNull(),
+  subcategory: text("subcategory"),
+  confidence: text("confidence").notNull().default("ai"), // 'ai' | 'manual'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Notas de Contexto para IA ───────────────────────────────────────────────
+
+export const payeeNotes = pgTable("payee_notes", {
+  id: serial("id").primaryKey(),
+  note: text("note").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ─── TypeScript Types ─────────────────────────────────────────────────────────
 
 export type Transaction = typeof transactions.$inferSelect;
@@ -148,3 +171,6 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type Alert = typeof alerts.$inferSelect;
 export type UserProfile = typeof userProfile.$inferSelect;
 export type NewUserProfile = typeof userProfile.$inferInsert;
+export type PayeeMapping = typeof payeeMappings.$inferSelect;
+export type NewPayeeMapping = typeof payeeMappings.$inferInsert;
+export type PayeeNote = typeof payeeNotes.$inferSelect;

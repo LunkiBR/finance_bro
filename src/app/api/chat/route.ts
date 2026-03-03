@@ -44,9 +44,11 @@ export async function POST(req: NextRequest) {
       try {
         const model = genai.getGenerativeModel({
           model: "gemini-2.5-flash",
-          tools: {
-            functionDeclarations: financeTools,
-          },
+          tools: [
+            {
+              functionDeclarations: financeTools,
+            },
+          ],
           systemInstruction: SYSTEM_PROMPT,
         });
 

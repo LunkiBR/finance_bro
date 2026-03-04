@@ -26,8 +26,7 @@ export default function CopilotoPage() {
 
     return (
         <div
-            className="flex h-screen -m-8 -mt-6"
-            style={{ marginLeft: "-32px", marginRight: "0" }}
+            className="flex h-full"
         >
             {/* Chat History Panel */}
             <ChatHistory />

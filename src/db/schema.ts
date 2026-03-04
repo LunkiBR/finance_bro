@@ -94,7 +94,7 @@ export const goals = pgTable("goals", {
 
 // ─── Conversas ────────────────────────────────────────────────────────────────
 
-export const conversations = pgTable("conversations", {
+export const conversations = pgTable("finance_conversations", {
   id: uuid("id").defaultRandom().primaryKey(),
   title: text("title").notNull().default("Nova conversa"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -102,6 +102,8 @@ export const conversations = pgTable("conversations", {
 });
 
 // ─── Chat com a IA ────────────────────────────────────────────────────────────
+// NOTE: conversations table is renamed to finance_conversations to avoid
+// conflict with the Supabase SaaS `conversations` table (client support convos)
 
 export const chatMessages = pgTable("chat_messages", {
   id: uuid("id").defaultRandom().primaryKey(),

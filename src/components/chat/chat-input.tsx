@@ -23,7 +23,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
     useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
-            textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
+            textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
         }
     }, [value]);
 
@@ -45,64 +45,95 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
 
     return (
         <div className="w-full">
-            {/* Quick actions - Moved above the input for better UX when fixed at bottom */}
-            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-none">
-                {QUICK_ACTIONS.map((action) => (
-                    <button
-                        key={action}
-                        onClick={() => onSend(action)}
-                        disabled={disabled}
-                        className="shrink-0 px-3 py-[5px] rounded-[6px] border text-caption transition-colors whitespace-nowrap"
-                        style={{
-                            background: "var(--bg-surface)",
-                            borderColor: "var(--border)",
-                            color: "var(--text-secondary)",
-                        }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.background = "var(--bg-elevated)";
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "var(--bg-surface)";
-                        }}
-                    >
-                        {action}
-                    </button>
-                ))}
-            </div>
+            {/* Quick prompts — only show when not loading */}
+            {!disabled && (
+                <div className="flex gap-2 mb-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                    {QUICK_ACTIONS.map((action) => (
+                        <button
+                            key={action}
+                            onClick={() => onSend(action)}
+                            className="shrink-0 px-3 py-[6px] rounded-full border text-[13px] whitespace-nowrap transition-all"
+                            style={{
+                                background: "var(--bg-elevated)",
+                                borderColor: "var(--border)",
+                                color: "var(--text-secondary)",
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = "var(--border-strong)";
+                                e.currentTarget.style.color = "var(--text-primary)";
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = "var(--border)";
+                                e.currentTarget.style.color = "var(--text-secondary)";
+                            }}
+                        >
+                            {action}
+                        </button>
+                    ))}
+                </div>
+            )}
 
-            {/* Input area */}
+            {/* ChatGPT-style pill input */}
             <div
-                className="flex items-end gap-2 rounded-[12px] border px-4 py-3"
+                className="relative flex items-end rounded-[16px] border px-4 py-3 transition-all"
                 style={{
                     background: "var(--bg-elevated)",
                     borderColor: "var(--border)",
-                    boxShadow: "0 4px 24px -8px rgba(0, 0, 0, 0.4)",
+                    boxShadow: "0 0 0 1px rgba(255,255,255,0.04), 0 8px 32px -8px rgba(0,0,0,0.5)",
                 }}
             >
+                {/* "+" / attach stub (decorative, matches ChatGPT left icon) */}
+                <div
+                    className="mr-3 shrink-0 mb-[2px]"
+                    style={{ color: "var(--text-muted)" }}
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+                    </svg>
+                </div>
+
                 <textarea
                     ref={textareaRef}
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Pergunte qualquer coisa sobre suas finanças..."
+                    placeholder="Pergunte alguma coisa"
                     rows={1}
                     disabled={disabled}
-                    className="flex-1 bg-transparent resize-none text-[15px] outline-none placeholder:text-[var(--text-muted)]"
-                    style={{ color: "var(--text-primary)", maxHeight: "200px" }}
+                    className="flex-1 bg-transparent resize-none text-[15px] outline-none leading-relaxed"
+                    style={{
+                        color: "var(--text-primary)",
+                        maxHeight: "200px",
+                        caretColor: "var(--accent-blue)",
+                    }}
                 />
+
+                {/* Send button — blue circle like ChatGPT */}
                 <button
                     onClick={handleSend}
                     disabled={!value.trim() || disabled}
-                    className="shrink-0 w-[32px] h-[32px] rounded-[8px] flex items-center justify-center transition-all disabled:opacity-20"
+                    className="ml-3 shrink-0 mb-[2px] w-[34px] h-[34px] rounded-full flex items-center justify-center transition-all"
                     style={{
-                        background: value.trim() ? "var(--accent-blue)" : "var(--bg-surface)",
-                        color: value.trim() ? "#fff" : "var(--text-muted)",
-                        border: value.trim() ? "none" : "1px solid var(--border)",
+                        background: value.trim() && !disabled ? "var(--accent-blue)" : "var(--bg-surface)",
+                        color: value.trim() && !disabled ? "#fff" : "var(--text-muted)",
+                        opacity: disabled && value.trim() ? 0.5 : 1,
                     }}
                 >
-                    <ArrowUp size={16} />
+                    {disabled
+                        ? (
+                            <div
+                                className="w-[14px] h-[14px] rounded-sm"
+                                style={{ background: "currentColor" }}
+                            />
+                        )
+                        : <ArrowUp size={16} />
+                    }
                 </button>
             </div>
+
+            <p className="text-center text-[11px] mt-2" style={{ color: "var(--text-muted)" }}>
+                Finance Friend pode cometer erros. Confira as informações importantes.
+            </p>
         </div>
     );
 }

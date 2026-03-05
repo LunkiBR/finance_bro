@@ -12,11 +12,16 @@ interface ChatMessageProps {
 
 export function ChatMessage({ role, content, chartSpec, isStreaming }: ChatMessageProps) {
     if (role === "user") {
+        // Exactly like ChatGPT: blue rounded pill, flush right
         return (
             <div className="flex justify-end mb-6">
                 <div
-                    className="max-w-[85%] px-5 py-3 rounded-[20px] rounded-br-[4px] text-[15px] leading-relaxed"
-                    style={{ background: "var(--accent-blue)", color: "#ffffff" }}
+                    className="max-w-[85%] px-5 py-3 text-[15px] leading-relaxed"
+                    style={{
+                        background: "#2f6feb",
+                        color: "#fff",
+                        borderRadius: "20px 20px 4px 20px",
+                    }}
                 >
                     {content}
                 </div>
@@ -24,45 +29,27 @@ export function ChatMessage({ role, content, chartSpec, isStreaming }: ChatMessa
         );
     }
 
+    // Assistant: plain left-aligned text exactly like ChatGPT (no bubble, no avatar circle)
     return (
-        <div className="flex justify-start mb-6 group">
-            <div className="flex gap-4 max-w-[85%]">
-                {/* Assistant Icon */}
-                <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1"
-                    style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)" }}
-                >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 2a2 2 0 0 1 2 2c-.001.554-.26 1.071-.707 1.4A4 4 0 0 0 12 13a4 4 0 0 0-1.293-7.6A2 2 0 0 1 12 2z" />
-                        <path d="M19 13v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v1" />
-                        <path d="M12 13v8" />
-                        <path d="m9 17 3-4 3 4" />
-                        <path d="M12 21h0" />
-                    </svg>
+        <div className="mb-8">
+            <div
+                className="prose-ff text-[15px] leading-[1.8]"
+                style={{ color: "var(--text-primary)" }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+            />
+            {isStreaming && (
+                <span
+                    className="inline-block w-[2px] h-[18px] ml-[2px] align-middle animate-pulse"
+                    style={{ background: "var(--text-primary)", borderRadius: "2px" }}
+                />
+            )}
+            {chartSpec && (
+                <div className="mt-4 rounded-[12px] overflow-hidden border" style={{ borderColor: "var(--border)" }}>
+                    <div className="p-4" style={{ background: "var(--bg-elevated)" }}>
+                        <InlineChart spec={chartSpec} />
+                    </div>
                 </div>
-
-                {/* Message Content */}
-                <div className="flex-1 min-w-0 pt-1">
-                    <div
-                        className="prose-ff text-[15px] leading-relaxed"
-                        style={{ color: "var(--text-primary)" }}
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-                    />
-                    {isStreaming && (
-                        <span
-                            className="inline-block w-[6px] h-[16px] ml-1 animate-pulse"
-                            style={{ background: "var(--text-muted)" }}
-                        />
-                    )}
-                    {chartSpec && (
-                        <div className="mt-4 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
-                            <div className="p-4" style={{ background: 'var(--bg-elevated)' }}>
-                                <InlineChart spec={chartSpec} />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
+            )}
         </div>
     );
 }
@@ -77,21 +64,23 @@ function renderMarkdown(text: string): string {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         // Headers
-        .replace(/^### (.+)$/gm, '<h3 class="text-h3 mt-4 mb-2" style="color:var(--text-primary)">$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2 class="text-h2 mt-4 mb-2" style="color:var(--text-primary)">$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1 class="text-h1 mt-4 mb-2" style="color:var(--text-primary)">$1</h1>')
+        .replace(/^### (.+)$/gm, '<h3 class="text-[16px] font-semibold mt-5 mb-2" style="color:var(--text-primary)">$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2 class="text-[18px] font-semibold mt-6 mb-2" style="color:var(--text-primary)">$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1 class="text-[20px] font-semibold mt-6 mb-3" style="color:var(--text-primary)">$1</h1>')
         // Bold
-        .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:590;color:var(--text-primary)">$1</strong>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:600;color:var(--text-primary)">$1</strong>')
         // Italic
         .replace(/\*(.+?)\*/g, "<em>$1</em>")
         // Inline code
-        .replace(/`([^`]+)`/g, '<code style="background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-family:var(--font-mono);font-size:13px">$1</code>')
+        .replace(/`([^`]+)`/g, '<code style="background:var(--bg-elevated);padding:2px 6px;border-radius:5px;font-family:var(--font-mono);font-size:13px;color:var(--text-primary)">$1</code>')
         // Blockquotes
-        .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:2px solid var(--border-strong);padding-left:12px;color:var(--text-secondary);margin:8px 0">$1</blockquote>')
+        .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid var(--border-strong);padding-left:14px;color:var(--text-secondary);margin:10px 0;font-style:italic">$1</blockquote>')
         // Unordered lists
-        .replace(/^- (.+)$/gm, '<li style="margin-left:16px;list-style:disc;margin-bottom:4px">$1</li>')
+        .replace(/^- (.+)$/gm, '<li style="margin-left:18px;list-style:disc;padding-left:4px;margin-bottom:6px;color:var(--text-primary)">$1</li>')
         // Ordered lists
-        .replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;list-style:decimal;margin-bottom:4px">$1</li>')
+        .replace(/^\d+\. (.+)$/gm, '<li style="margin-left:18px;list-style:decimal;padding-left:4px;margin-bottom:6px;color:var(--text-primary)">$1</li>')
+        // Horizontal rule
+        .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:20px 0" />')
         // Line breaks
         .replace(/\n\n/g, "<br/><br/>")
         .replace(/\n/g, "<br/>");
@@ -103,17 +92,17 @@ function renderMarkdown(text: string): string {
             const rows = match.split("<br/>").filter((r) => r.trim());
             if (rows.length < 2) return match;
 
-            let tableHtml = '<div style="overflow-x:auto;margin:12px 0"><table style="width:100%;border-collapse:collapse;font-size:13px">';
+            let tableHtml = '<div style="overflow-x:auto;margin:16px 0"><table style="width:100%;border-collapse:collapse;font-size:14px">';
 
             rows.forEach((row, i) => {
-                if (row.includes("---")) return; // Skip separator row
+                if (row.includes("---")) return;
                 const cells = row.split("|").filter((c) => c.trim());
                 const tag = i === 0 ? "th" : "td";
                 tableHtml += "<tr>";
                 cells.forEach((cell) => {
                     const style = i === 0
-                        ? 'style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border-strong);color:var(--text-secondary);font-weight:500"'
-                        : 'style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-primary)"';
+                        ? 'style="text-align:left;padding:10px 14px;border-bottom:1px solid var(--border-strong);color:var(--text-secondary);font-weight:500;font-size:13px"'
+                        : 'style="text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text-primary)"';
                     tableHtml += `<${tag} ${style}>${cell.trim()}</${tag}>`;
                 });
                 tableHtml += "</tr>";

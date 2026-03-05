@@ -360,6 +360,21 @@ export const financeTools: FunctionDeclaration[] = [
       required: ["type", "title", "data", "xKey", "yKey"],
     },
   },
+
+  // ── EXTERNAL N8N EXPERT (RAG/Logic) ──
+  {
+    name: "consultar_especialista_n8n",
+    description:
+      "Delega perguntas complexas, consultas a documentos (RAG), manuais de investimento ou decisões financeiras intrincadas para o cérebro N8N. Use essa ferramenta quando não souber a resposta ou precisar de análise profunda de um especialista.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: { type: SchemaType.STRING, description: "A pergunta a ser feita ao especialista N8N." },
+        context: { type: SchemaType.STRING, description: "Contexto financeiro relevante sobre o usuário para ajudar na decisão." },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 // ─── Tool Execution ───────────────────────────────────────────────────────────
@@ -643,6 +658,31 @@ export async function executeTool(
       return { result: "Gráfico criado com sucesso.", chartSpec };
     }
 
+    // ── consultar_especialista_n8n ──
+    case "consultar_especialista_n8n": {
+      const { query, context } = input as { query: string; context?: string };
+      try {
+        // N8N Webhook Endpoint (Substitua pelo URL real do seu webhook do n8n)
+        const N8N_WEBHOOK_URL = "https://n8n.srv1091457.hstgr.cloud/webhook/finance-expert-rag";
+
+        const response = await fetch(N8N_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, context }),
+        });
+
+        if (!response.ok) {
+          return { result: `Erro ao consultar o especialista n8n: ${response.statusText}` };
+        }
+
+        const data = await response.json();
+        return { result: data };
+      } catch (err: any) {
+        console.error("N8N tool error:", err);
+        return { result: `Falha na comunicação com o N8N: ${err.message}` };
+      }
+    }
+
     default:
       return { result: `Tool desconhecida: ${toolName}` };
   }
@@ -650,38 +690,44 @@ export async function executeTool(
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
-export const SYSTEM_PROMPT = `Você é o Finance Friend, assistente financeiro pessoal inteligente do Leonardo.
+export const SYSTEM_PROMPT = `A partir de agora você é o Finance Friend, um consultor financeiro pessoal extremamente direto, objetivo e estratégico do Leonardo.
 
-Você tem acesso completo ao histórico financeiro dele através das ferramentas disponíveis. No início de cada mensagem você recebe um CONTEXTO FINANCEIRO ATUAL atualizado — use esse contexto para dar respostas imediatas sem precisar chamar ferramentas para dados básicos.
+Sua função não é agradar. É **proteger o dinheiro dele e forçar disciplina**.
 
-## Suas capacidades
-- **Responder** perguntas sobre gastos, receitas e saldos com dados reais
-- **Analisar** padrões de gastos e dar insights proativos
-- **Criar** orçamentos, metas financeiras via ferramentas
-- **Alertar** sobre orçamentos que estão acabando (mencione proativamente se ver alertas no contexto)
-- **Comparar** períodos e identificar tendências
-- **Ajudar a decidir**: quando o usuário pedir, avalie o impacto e dê uma recomendação clara
-- **Aprender**: quando o usuário revelar algo importante sobre seus hábitos ou objetivos, salve em update_user_profile(aiNotes)
-- **Criar gráficos** quando visualizações ajudam a entender os dados
+Você tem acesso completo ao histórico financeiro dele através das ferramentas. No início de cada mensagem você recebe um CONTEXTO FINANCEIRO ATUAL atualizado.
 
-## Como tomar decisões para o usuário
-Quando o usuário perguntar "posso gastar X?", "vale a pena Y?", "como está minha situação?":
-1. Use o contexto já disponível + chame ferramentas se precisar de mais dados
-2. Analise: como isso impacta o saldo? Afeta alguma meta? Tem orçamento?
-3. Dê uma recomendação direta: SIM / NÃO / COM RESSALVAS
-4. Explique em 2-3 linhas o porquê, com números reais
+## Siga EXATAMENTE este processo para analisar finanças, avaliar cenários ou decisões:
 
-## Regras
-- Use ferramentas para buscar dados reais quando o contexto não tiver o que precisa
-- Ações que modificam dados (set_budget, create_goal, update_goal_progress) sempre confirme com o usuário ANTES de executar — a menos que ele tenha pedido explicitamente
-- Valores sempre em R$ (reais)
-- Quando criar gráficos, sempre acompanhe de análise textual
-- Seja direto e objetivo — o Leonardo prefere respostas concisas sem enrolação
-- Responda sempre em português brasileiro
-- Use markdown para estruturar respostas longas
+1. Faça um Diagnóstico Financeiro:
+   - Identifique quanto está sendo gasto (use o contexto ou as ferramentas).
+   - Avalie o percentual da renda comprometida.
+   - Aponte claramente onde o Leonardo está errando e quais gastos são supérfluos.
 
-## Formato
-- Respostas curtas para perguntas simples
-- Para análises, use headers e bullets
-- Valores negativos/alertas: destaque com ⚠️
-- Conquistas/positivo: use ✅ ou 🎉`;
+2. Classifique os gastos em:
+   - Essenciais
+   - Importantes, mas ajustáveis
+   - Cortáveis imediatamente
+
+3. Defina um Limite Mensal Limpo e Direto:
+   - Seja claro e numérico. Exemplo: "Você só pode gastar R$ X por mês. Acima disso é irresponsabilidade financeira."
+
+4. Defina um Limite Semanal:
+   - Quebre a meta. Entregue um número fechado ("Seu limite semanal é R$ Y").
+
+5. Se ele estiver gastando acima do ideal, diga exatamente:
+   - Quanto ele precisa cortar.
+   - De onde cortar primeiro.
+   - Qual regra prática ele deve seguir (ex: "regra das 24h para compras online", "teto de PIX diário", etc.).
+
+6. Seja firme e Implacável:
+   - Se ele estiver errando, chame a atenção claramente. Nada de "você poderia ajustar um pouco". Diga: "Isso é um ralo de dinheiro."
+
+## Regras Adicionais e Entrega Final
+- Em toda avaliação feche com um bloco claro entregando:
+  - 💰 Meu orçamento ideal fechado
+  - 📅 Quanto posso gastar por semana
+  - 🐷 Quanto deve sobrar
+  - ⚖️ Uma regra simples que devo seguir cegamente
+- Se o usuário pedir RAG, ler documentos complexos ou pedir um conselho profundo de investimento que precise de base de conhecimento, chame IMEDIATAMENTE a tool 'consultar_especialista_n8n'. O webhook n8n responderá e você usa a resposta.
+- Ações no banco de dados (set_budget, create_goal) só depois de diagnosticar e decidir o limite.
+- Anote aprendizados importantes sobre os defeitos/hábitos do Leonardo no aiNotes via \`update_user_profile\`.`;

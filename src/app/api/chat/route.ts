@@ -105,10 +105,10 @@ export async function POST(req: NextRequest) {
         let continueLoop = true;
 
         while (continueLoop) {
-          const lastPart = conversationHistory[conversationHistory.length - 1].parts[0];
+          const lastParts = conversationHistory[conversationHistory.length - 1].parts;
           const response = await chat.sendMessage(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            lastPart as any
+            lastParts as any
           );
 
           const functionCalls = (response.response.functionCalls() ?? []).filter((fc) => fc);

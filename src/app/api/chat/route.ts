@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { genai, financeTools, executeTool, SYSTEM_PROMPT } from "@/lib/claude";
+import { genai, financeTools, executeTool, SYSTEM_PROMPT, buildContextSnapshot } from "@/lib/claude";
 import { db } from "@/db";
 import { chatMessages, conversations } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -73,6 +73,12 @@ export async function POST(req: NextRequest) {
           console.error("Chat: falha ao salvar mensagem do usuário:", dbErr);
         }
 
+        // Build context snapshot (live financial state)
+        const contextSnapshot = await buildContextSnapshot();
+        const systemInstructionWithContext = contextSnapshot
+          ? `${SYSTEM_PROMPT}\n\n${contextSnapshot}`
+          : SYSTEM_PROMPT;
+
         const model = genai.getGenerativeModel({
           model: "gemini-2.5-flash",
           tools: [
@@ -81,7 +87,7 @@ export async function POST(req: NextRequest) {
               functionDeclarations: financeTools as any,
             },
           ],
-          systemInstruction: SYSTEM_PROMPT,
+          systemInstruction: systemInstructionWithContext,
         });
 
         const conversationHistory = history

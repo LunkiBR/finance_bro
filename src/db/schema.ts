@@ -137,6 +137,7 @@ export const userProfile = pgTable("user_profile", {
   temReserva: text("tem_reserva"),
   categoriasAltas: text("categorias_altas").array(),
   onboardingCompleto: boolean("onboarding_completo").notNull().default(false),
+  aiNotes: text("ai_notes"), // Observações que a IA anota sobre o usuário
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

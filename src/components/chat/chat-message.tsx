@@ -15,38 +15,53 @@ export function ChatMessage({ role, content, chartSpec, isStreaming }: ChatMessa
         return (
             <div className="flex justify-end mb-6">
                 <div
-                    className="max-w-[85%] text-body"
-                    style={{ color: "var(--text-primary)" }}
+                    className="max-w-[85%] px-5 py-3 rounded-[20px] rounded-br-[4px] text-[15px] leading-relaxed"
+                    style={{ background: "var(--accent-blue)", color: "#ffffff" }}
                 >
                     {content}
-                    <div
-                        className="mt-2 h-[1px]"
-                        style={{ background: "var(--border)" }}
-                    />
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="mb-6">
-            <div className="max-w-[85%]">
+        <div className="flex justify-start mb-6 group">
+            <div className="flex gap-4 max-w-[85%]">
+                {/* Assistant Icon */}
                 <div
-                    className="prose-ff text-body"
-                    style={{ color: "var(--text-primary)" }}
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-                />
-                {isStreaming && (
-                    <span
-                        className="inline-block w-[6px] h-[16px] ml-1 animate-pulse"
-                        style={{ background: "var(--text-muted)" }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1"
+                    style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)" }}
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a2 2 0 0 1 2 2c-.001.554-.26 1.071-.707 1.4A4 4 0 0 0 12 13a4 4 0 0 0-1.293-7.6A2 2 0 0 1 12 2z" />
+                        <path d="M19 13v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v1" />
+                        <path d="M12 13v8" />
+                        <path d="m9 17 3-4 3 4" />
+                        <path d="M12 21h0" />
+                    </svg>
+                </div>
+
+                {/* Message Content */}
+                <div className="flex-1 min-w-0 pt-1">
+                    <div
+                        className="prose-ff text-[15px] leading-relaxed"
+                        style={{ color: "var(--text-primary)" }}
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
                     />
-                )}
-                {chartSpec && (
-                    <div className="mt-4">
-                        <InlineChart spec={chartSpec} />
-                    </div>
-                )}
+                    {isStreaming && (
+                        <span
+                            className="inline-block w-[6px] h-[16px] ml-1 animate-pulse"
+                            style={{ background: "var(--text-muted)" }}
+                        />
+                    )}
+                    {chartSpec && (
+                        <div className="mt-4 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+                            <div className="p-4" style={{ background: 'var(--bg-elevated)' }}>
+                                <InlineChart spec={chartSpec} />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

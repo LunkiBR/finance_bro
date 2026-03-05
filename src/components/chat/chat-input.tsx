@@ -45,40 +45,8 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
 
     return (
         <div className="w-full">
-            {/* Input area */}
-            <div
-                className="flex items-end gap-2 rounded-[6px] border px-4 py-3"
-                style={{
-                    background: "var(--bg-elevated)",
-                    borderColor: "var(--border)",
-                }}
-            >
-                <textarea
-                    ref={textareaRef}
-                    value={value}
-                    onChange={(e) => setValue(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Pergunte qualquer coisa sobre suas finanças..."
-                    rows={1}
-                    disabled={disabled}
-                    className="flex-1 bg-transparent resize-none text-body outline-none placeholder:text-[var(--text-muted)]"
-                    style={{ color: "var(--text-primary)", maxHeight: "120px" }}
-                />
-                <button
-                    onClick={handleSend}
-                    disabled={!value.trim() || disabled}
-                    className="shrink-0 w-[28px] h-[28px] rounded-[4px] flex items-center justify-center transition-opacity disabled:opacity-20"
-                    style={{
-                        background: "var(--text-primary)",
-                        color: "var(--bg-base)",
-                    }}
-                >
-                    <ArrowUp size={16} />
-                </button>
-            </div>
-
-            {/* Quick actions */}
-            <div className="flex gap-2 mt-3 overflow-x-auto pb-1 scrollbar-none">
+            {/* Quick actions - Moved above the input for better UX when fixed at bottom */}
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-none">
                 {QUICK_ACTIONS.map((action) => (
                     <button
                         key={action}
@@ -100,6 +68,40 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                         {action}
                     </button>
                 ))}
+            </div>
+
+            {/* Input area */}
+            <div
+                className="flex items-end gap-2 rounded-[12px] border px-4 py-3"
+                style={{
+                    background: "var(--bg-elevated)",
+                    borderColor: "var(--border)",
+                    boxShadow: "0 4px 24px -8px rgba(0, 0, 0, 0.4)",
+                }}
+            >
+                <textarea
+                    ref={textareaRef}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Pergunte qualquer coisa sobre suas finanças..."
+                    rows={1}
+                    disabled={disabled}
+                    className="flex-1 bg-transparent resize-none text-[15px] outline-none placeholder:text-[var(--text-muted)]"
+                    style={{ color: "var(--text-primary)", maxHeight: "200px" }}
+                />
+                <button
+                    onClick={handleSend}
+                    disabled={!value.trim() || disabled}
+                    className="shrink-0 w-[32px] h-[32px] rounded-[8px] flex items-center justify-center transition-all disabled:opacity-20"
+                    style={{
+                        background: value.trim() ? "var(--accent-blue)" : "var(--bg-surface)",
+                        color: value.trim() ? "#fff" : "var(--text-muted)",
+                        border: value.trim() ? "none" : "1px solid var(--border)",
+                    }}
+                >
+                    <ArrowUp size={16} />
+                </button>
             </div>
         </div>
     );

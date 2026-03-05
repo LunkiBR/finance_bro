@@ -17,7 +17,7 @@ interface UploadResult {
 const PIPELINE_STAGES: { key: Stage; label: string; detail: string }[] = [
     { key: "enviando", label: "Enviando arquivo", detail: "Transferindo o CSV para o servidor..." },
     { key: "parseando", label: "Lendo transações", detail: "Detectando formato e analisando cada linha..." },
-    { key: "categorizando", label: "Categorizando com IA", detail: "GPT-4o-mini classificando cada transação..." },
+    { key: "categorizando", label: "Categorizando com IA", detail: "Inteligência Artificial classificando cada transação..." },
     { key: "importando", label: "Salvando no banco", detail: "Inserindo transações e atualizando orçamentos..." },
     { key: "done", label: "Concluído", detail: "" },
 ];

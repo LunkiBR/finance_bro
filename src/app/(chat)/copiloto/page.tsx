@@ -8,13 +8,17 @@ import { ToolIndicator } from "@/components/chat/tool-indicator";
 import { useChatStream } from "@/hooks/use-chat-stream";
 
 export default function CopilotoPage() {
-    const { messages, isLoading, currentTool, sendMessage, loadHistory } = useChatStream();
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const bottomRef = useRef<HTMLDivElement>(null);
+    const {
+        messages,
+        isLoading,
+        currentTool,
+        conversationId,
+        sendMessage,
+        loadConversation,
+        resetConversation,
+    } = useChatStream();
 
-    useEffect(() => {
-        loadHistory();
-    }, [loadHistory]);
+    const bottomRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -25,13 +29,17 @@ export default function CopilotoPage() {
     return (
         <div className="flex h-full w-full">
             {/* Chat History - Left sidebar */}
-            <ChatHistory />
+            <ChatHistory
+                activeId={conversationId}
+                onSelect={loadConversation}
+                onNew={resetConversation}
+            />
 
             {/* Main Chat Area */}
             <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
                 {isEmpty ? (
                     /* ── Empty state: exactly like ChatGPT ── */
-                    <div className="flex-1 flex flex-col items-center justify-center pb-40 px-4">
+                    <div className="flex-1 flex flex-col items-center justify-center px-4">
                         <h1
                             className="text-[28px] font-semibold mb-10 tracking-tight text-center"
                             style={{ color: "var(--text-primary)" }}
@@ -45,13 +53,12 @@ export default function CopilotoPage() {
                 ) : (
                     /* ── Active chat ── */
                     <>
-                        {/* Scrollable messages */}
+                        {/* Scrollable messages — full flex column */}
                         <div
-                            ref={scrollRef}
-                            className="flex-1 overflow-y-auto"
+                            className="flex-1 overflow-y-auto flex flex-col items-center"
                             style={{ scrollbarWidth: "thin", scrollbarColor: "var(--border) transparent" }}
                         >
-                            <div className="max-w-[760px] mx-auto px-4 pt-10 pb-52">
+                            <div className="w-full max-w-[760px] px-4 pt-10 pb-52">
                                 {messages.map((msg) => (
                                     <ChatMessage
                                         key={msg.id}

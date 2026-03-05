@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { genai, financeTools, executeTool, SYSTEM_PROMPT } from "@/lib/claude";
 import { db } from "@/db";
-import { chatMessages } from "@/db/schema";
-import { desc } from "drizzle-orm";
+import { chatMessages, conversations } from "@/db/schema";
+import { desc, eq } from "drizzle-orm";
 import type { ChartSpec } from "@/lib/chart-types";
 
 export const runtime = "nodejs";
@@ -10,7 +10,10 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { message } = (await req.json()) as { message: string };
+    const { message, conversationId } = (await req.json()) as {
+      message: string;
+      conversationId?: string;
+    };
 
     if (!message?.trim()) {
       return new Response(JSON.stringify({ error: "Mensagem vazia." }), {
@@ -19,32 +22,50 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Busca histórico de mensagens — se falhar, usa histórico vazio
+    // Resolve or create a conversation
+    let convId = conversationId;
+    if (!convId) {
+      const [conv] = await db
+        .insert(conversations)
+        .values({ title: "Nova conversa" })
+        .returning();
+      convId = conv.id;
+    }
+
+    // Busca histórico da conversa
     let history: typeof chatMessages.$inferSelect[] = [];
     try {
       history = await db
         .select()
         .from(chatMessages)
+        .where(eq(chatMessages.conversationId, convId))
         .orderBy(desc(chatMessages.createdAt))
         .limit(20);
     } catch (dbErr) {
       console.error("Chat: falha ao buscar histórico:", dbErr);
-      // Continua sem histórico — não bloqueia o stream
     }
 
     const encoder = new TextEncoder();
     const stream = new TransformStream();
     const writer = stream.writable.getWriter();
 
-    // Processa em background
+    // Envia o conversationId logo no início do stream
     (async () => {
       let fullResponse = "";
       let chartSpec: ChartSpec | undefined;
 
       try {
-        // Salva a mensagem do usuário (dentro do background — não bloqueia o stream)
+        // Sinaliza o conversationId logo de início
+        await writer.write(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: "conversation_id", id: convId })}\n\n`
+          )
+        );
+
+        // Salva a mensagem do usuário
         try {
           await db.insert(chatMessages).values({
+            conversationId: convId,
             role: "user",
             content: message,
           });
@@ -63,7 +84,6 @@ export async function POST(req: NextRequest) {
           systemInstruction: SYSTEM_PROMPT,
         });
 
-        // Constrói histórico para Gemini (sem chart_spec inline)
         const conversationHistory = history
           .reverse()
           .map((m) => ({
@@ -72,12 +92,10 @@ export async function POST(req: NextRequest) {
           }))
           .concat([{ role: "user" as const, parts: [{ text: message }] }]);
 
-        // Inicia o chat
         const chat = model.startChat({
           history: conversationHistory.slice(0, -1),
         });
 
-        // Loop de agente: Gemini pode chamar múltiplas ferramentas
         let continueLoop = true;
 
         while (continueLoop) {
@@ -87,21 +105,15 @@ export async function POST(req: NextRequest) {
             lastPart as any
           );
 
-          const functionCalls = (response.response
-            .functionCalls() ?? [])
-            .filter((fc) => fc);
+          const functionCalls = (response.response.functionCalls() ?? []).filter((fc) => fc);
 
           if (functionCalls.length > 0) {
-            // Processa cada function call
             const functionResults = [];
 
             for (const fc of functionCalls) {
               await writer.write(
                 encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "tool_use",
-                    tool: fc.name,
-                  })}\n\n`
+                  `data: ${JSON.stringify({ type: "tool_use", tool: fc.name })}\n\n`
                 )
               );
 
@@ -113,14 +125,10 @@ export async function POST(req: NextRequest) {
               if (cs) chartSpec = cs;
 
               functionResults.push({
-                functionResponse: {
-                  name: fc.name,
-                  response: result,
-                },
+                functionResponse: { name: fc.name, response: result },
               });
             }
 
-            // Envia os resultados de volta para Gemini continuar a conversa
             conversationHistory.push({
               role: "model" as const,
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,18 +140,14 @@ export async function POST(req: NextRequest) {
               parts: functionResults as any,
             });
           } else {
-            // Resposta final — transmite em chunks
             const textContent = response.response.text();
             fullResponse += textContent;
 
-            // Envia em chunks de ~50 chars para efeito de streaming
             const chunkSize = 50;
             for (let i = 0; i < textContent.length; i += chunkSize) {
               const chunk = textContent.slice(i, i + chunkSize);
               await writer.write(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "text", text: chunk })}\n\n`
-                )
+                encoder.encode(`data: ${JSON.stringify({ type: "text", text: chunk })}\n\n`)
               );
               await new Promise((r) => setTimeout(r, 10));
             }
@@ -152,43 +156,49 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Envia o chartSpec se houver
         if (chartSpec) {
           await writer.write(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "chart",
-                spec: chartSpec,
-              })}\n\n`
-            )
+            encoder.encode(`data: ${JSON.stringify({ type: "chart", spec: chartSpec })}\n\n`)
           );
         }
 
-        // Salva resposta do assistente no histórico
+        // Salva resposta do assistente
         try {
           await db.insert(chatMessages).values({
+            conversationId: convId,
             role: "assistant",
             content: fullResponse,
             chartSpec: chartSpec ?? null,
           });
+
+          // Atualiza updated_at da conversa
+          await db
+            .update(conversations)
+            .set({ updatedAt: new Date() })
+            .where(eq(conversations.id, convId!));
+
+          // Auto-título: usa as primeiras 50 chars da primeira mensagem do usuário
+          const existingTitle = history.length === 0
+            ? message.slice(0, 50) + (message.length > 50 ? "…" : "")
+            : null;
+          if (existingTitle) {
+            await db
+              .update(conversations)
+              .set({ title: existingTitle })
+              .where(eq(conversations.id, convId!));
+          }
         } catch (dbErr) {
-          console.error("Chat: falha ao salvar resposta do assistente:", dbErr);
+          console.error("Chat: falha ao salvar resposta:", dbErr);
         }
 
-        // Sinaliza fim do stream
         await writer.write(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "done" })}\n\n`
-          )
+          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
         );
       } catch (err) {
         console.error("Chat error:", err);
         await writer.write(
           encoder.encode(
-            `data: ${JSON.stringify({
-              type: "error",
-              message: "Erro ao processar resposta.",
-            })}\n\n`
+            `data: ${JSON.stringify({ type: "error", message: "Erro ao processar resposta." })}\n\n`
           )
         );
       } finally {
@@ -213,7 +223,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // Retorna histórico de mensagens
+  // Keep backward compat — legacy history (not scoped by conversation)
   try {
     const history = await db
       .select()

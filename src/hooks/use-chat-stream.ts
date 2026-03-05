@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import type { ChartSpec } from "@/lib/chart-types";
 
-interface ChatStreamMessage {
+export interface ChatStreamMessage {
     id: string;
     role: "user" | "assistant";
     content: string;
@@ -11,32 +11,39 @@ interface ChatStreamMessage {
     isStreaming?: boolean;
 }
 
-interface ToolCall {
-    tool: string;
-}
-
 export function useChatStream() {
     const [messages, setMessages] = useState<ChatStreamMessage[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [currentTool, setCurrentTool] = useState<string | null>(null);
+    const [conversationId, setConversationId] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
 
-    const loadHistory = useCallback(async () => {
+    // Load an existing conversation's messages from DB
+    const loadConversation = useCallback(async (id: string) => {
         try {
-            const res = await fetch("/api/chat");
+            const res = await fetch(`/api/conversations/${id}/messages`);
             if (!res.ok) return;
             const history = await res.json();
+            setConversationId(id);
             setMessages(
-                history.map((m: { id: string; role: string; content: string; chartSpec?: ChartSpec }) => ({
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                history.map((m: any) => ({
                     id: m.id,
                     role: m.role as "user" | "assistant",
                     content: m.content,
-                    chartSpec: m.chartSpec || null,
+                    chartSpec: m.chart_spec || null,
                 }))
             );
         } catch {
             // silently fail
         }
+    }, []);
+
+    // Reset to empty state (new conversation)
+    const resetConversation = useCallback(() => {
+        setMessages([]);
+        setConversationId(null);
+        setCurrentTool(null);
     }, []);
 
     const sendMessage = useCallback(async (content: string) => {
@@ -63,7 +70,10 @@ export function useChatStream() {
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: content }),
+                body: JSON.stringify({
+                    message: content,
+                    conversationId: conversationId,
+                }),
                 signal: abortRef.current.signal,
             });
 
@@ -86,7 +96,9 @@ export function useChatStream() {
                     try {
                         const data = JSON.parse(line.slice(6));
 
-                        if (data.type === "tool_use") {
+                        if (data.type === "conversation_id") {
+                            setConversationId(data.id);
+                        } else if (data.type === "tool_use") {
                             setCurrentTool(data.tool);
                         } else if (data.type === "text") {
                             setCurrentTool(null);
@@ -106,10 +118,7 @@ export function useChatStream() {
                                 const updated = [...prev];
                                 const last = updated[updated.length - 1];
                                 if (last.role === "assistant") {
-                                    updated[updated.length - 1] = {
-                                        ...last,
-                                        chartSpec: data.spec,
-                                    };
+                                    updated[updated.length - 1] = { ...last, chartSpec: data.spec };
                                 }
                                 return updated;
                             });
@@ -118,10 +127,7 @@ export function useChatStream() {
                                 const updated = [...prev];
                                 const last = updated[updated.length - 1];
                                 if (last.role === "assistant") {
-                                    updated[updated.length - 1] = {
-                                        ...last,
-                                        isStreaming: false,
-                                    };
+                                    updated[updated.length - 1] = { ...last, isStreaming: false };
                                 }
                                 return updated;
                             });
@@ -163,13 +169,15 @@ export function useChatStream() {
             setIsLoading(false);
             setCurrentTool(null);
         }
-    }, []);
+    }, [conversationId]);
 
     return {
         messages,
         isLoading,
         currentTool,
+        conversationId,
         sendMessage,
-        loadHistory,
+        loadConversation,
+        resetConversation,
     };
 }

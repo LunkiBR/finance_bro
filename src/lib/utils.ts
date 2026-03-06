@@ -33,6 +33,13 @@ export function calcDelta(current: number, prev: number): number | undefined {
     return Math.round(((current - prev) / prev) * 100);
 }
 
+/** Converts month string to sortable number: 'jan/26' → 2601, 'dez/25' → 2512 */
+export function monthToNum(month: string): number {
+    const [m, y] = month.split('/');
+    const mIdx = PT_MONTHS.indexOf(m) + 1;
+    return parseInt(y) * 100 + mIdx;
+}
+
 /** Formats number as Brazilian currency string (without R$): '1.234,56' */
 export function formatBRL(value: number): string {
     return new Intl.NumberFormat('pt-BR', {

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { MonthSelector } from "@/components/transactions/month-selector";
 import { CategoryBadge, CategoryPicker } from "@/components/transactions/category-badge";
 import { getCategoryColor, ALL_CATEGORIES } from "@/lib/category-colors";
-import { getCurrentMonth } from "@/lib/utils";
+import { getCurrentMonth, formatBRL } from "@/lib/utils";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface Transaction {
@@ -144,11 +144,11 @@ export default function TransacoesPage() {
                         color: "var(--text-secondary)",
                     }}
                 >
-                    <span>Receitas: <strong style={{ color: "var(--accent-green)" }}>R$ {data.summary.receitas.toLocaleString("pt-BR")}</strong></span>
+                    <span>Receitas: <strong style={{ color: "var(--accent-green)" }}>R$ {formatBRL(data.summary.receitas)}</strong></span>
                     <span>·</span>
-                    <span>Despesas: <strong style={{ color: "var(--accent-red)" }}>R$ {data.summary.despesas.toLocaleString("pt-BR")}</strong></span>
+                    <span>Despesas: <strong style={{ color: "var(--accent-red)" }}>R$ {formatBRL(data.summary.despesas)}</strong></span>
                     <span>·</span>
-                    <span>Saldo: <strong style={{ color: "var(--text-primary)" }}>R$ {data.summary.saldo.toLocaleString("pt-BR")}</strong></span>
+                    <span>Saldo: <strong style={{ color: "var(--text-primary)" }}>R$ {formatBRL(data.summary.saldo)}</strong></span>
                     <span>·</span>
                     <span>{data.summary.count} transações</span>
                 </div>
@@ -211,7 +211,7 @@ export default function TransacoesPage() {
                                             )}
                                         </td>
                                         <td className="py-2 px-2 text-right" style={{ color: isIncome ? "var(--accent-green)" : "var(--accent-red)" }}>
-                                            {isIncome ? "+" : "-"}R$ {Math.abs(Number(tx.amount)).toLocaleString("pt-BR")}
+                                            {isIncome ? "+" : "-"}R$ {formatBRL(Math.abs(Number(tx.amount)))}
                                         </td>
                                     </tr>
                                 );

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, budgets, goals } from "@/db/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
-import { getCurrentMonth, getPrevMonth, formatBRL } from "@/lib/utils";
+import { getCurrentMonth, getPrevMonth, formatBRL, monthToNum } from "@/lib/utils";
 
 export async function GET(req: NextRequest) {
     const month = req.nextUrl.searchParams.get("month") || getCurrentMonth();
@@ -69,7 +69,9 @@ export async function GET(req: NextRequest) {
             if (row.type === "receita") trendMap[row.month].receitas = Number(row.total);
             else trendMap[row.month].despesas = Number(row.total);
         }
-        const trend = Object.values(trendMap).slice(-6);
+        const trend = Object.values(trendMap)
+            .sort((a, b) => monthToNum(a.month) - monthToNum(b.month))
+            .slice(-6);
 
         // ── Budget status ─────────────────────────────────────────────────────
         const budgetRows = await db.select().from(budgets).where(eq(budgets.month, month));

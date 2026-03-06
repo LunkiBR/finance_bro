@@ -46,13 +46,14 @@ export async function GET(req: NextRequest) {
         ]);
 
         const total = countResult[0]?.count || 0;
-        const receitas = summaryResult.find((r) => r.type === "receita")?.total || 0;
-        const despesas = summaryResult.find((r) => r.type === "despesa")?.total || 0;
+        const receitas = Number(summaryResult.find((r) => r.type === "receita")?.total ?? 0);
+        const despesas = Number(summaryResult.find((r) => r.type === "despesa")?.total ?? 0);
+        const saldo = Math.round((receitas - despesas) * 100) / 100;
 
         return NextResponse.json({
             transactions: rows,
-            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-            summary: { receitas, despesas, saldo: receitas - despesas, count: total },
+            pagination: { page, limit, total, totalPages: Math.ceil(Number(total) / limit) },
+            summary: { receitas, despesas, saldo, count: Number(total) },
         });
     } catch (err) {
         console.error("Transactions error:", err);

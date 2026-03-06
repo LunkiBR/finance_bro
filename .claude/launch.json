@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "finance-app",
-      "runtimeExecutable": "/c/Program Files/nodejs/node",
-      "runtimeArgs": ["node_modules/.bin/next", "dev"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/next/dist/bin/next", "dev"],
       "port": 3000
     }
   ]

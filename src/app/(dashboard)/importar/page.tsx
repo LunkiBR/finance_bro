@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { Upload, CheckCircle, Loader, Circle, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 
 // These stages map 1:1 to what actually happens in the n8n pipeline.
@@ -246,21 +247,41 @@ export default function ImportarPage() {
                     {stage === "done" && result !== null && (
                         <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
                             {(result.transactions ?? 0) > 0 ? (
-                                <p className="text-[13px] mb-3" style={{ color: "var(--accent-green)" }}>
-                                    ✓ {result.transactions} transaç{result.transactions === 1 ? "ão importada" : "ões importadas"} com sucesso
-                                </p>
+                                <>
+                                    <p className="text-[13px] mb-3" style={{ color: "var(--accent-green)" }}>
+                                        ✓ {result.transactions} transaç{result.transactions === 1 ? "ão importada" : "ões importadas"} com sucesso
+                                    </p>
+                                    <div className="flex items-center gap-4">
+                                        <Link
+                                            href="/transacoes"
+                                            className="text-caption transition-opacity hover:opacity-80"
+                                            style={{ color: "var(--accent-blue)" }}
+                                        >
+                                            Ver transações →
+                                        </Link>
+                                        <button
+                                            onClick={() => { setStage("idle"); setResult(null); }}
+                                            className="text-caption transition-opacity hover:opacity-80"
+                                            style={{ color: "var(--text-muted)" }}
+                                        >
+                                            Importar outro arquivo
+                                        </button>
+                                    </div>
+                                </>
                             ) : (
-                                <p className="text-[13px] mb-3" style={{ color: "var(--text-secondary)" }}>
-                                    ✓ Arquivo processado. Nenhuma transação nova foi encontrada (possível duplicata ou CSV vazio).
-                                </p>
+                                <>
+                                    <p className="text-[13px] mb-3" style={{ color: "var(--text-secondary)" }}>
+                                        ✓ Arquivo processado. Nenhuma transação nova foi encontrada (possível duplicata ou CSV vazio).
+                                    </p>
+                                    <button
+                                        onClick={() => { setStage("idle"); setResult(null); }}
+                                        className="text-caption transition-opacity hover:opacity-80"
+                                        style={{ color: "var(--accent-blue)" }}
+                                    >
+                                        Importar outro arquivo
+                                    </button>
+                                </>
                             )}
-                            <button
-                                onClick={() => { setStage("idle"); setResult(null); }}
-                                className="text-caption transition-opacity hover:opacity-80"
-                                style={{ color: "var(--accent-blue)" }}
-                            >
-                                Importar outro arquivo
-                            </button>
                         </div>
                     )}
                 </div>

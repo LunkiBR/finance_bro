@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-
+import { db } from "@/db";
+import { userProfile } from "@/db/schema";
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Arquivo vazio." }, { status: 400 });
     }
 
+    // Fetch user info for personalization
+    const profileInfo = await db.select().from(userProfile).limit(1);
+    const userName = profileInfo[0]?.nome || "usuário";
+
     // Envia ao n8n para processamento
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nUrl) {
@@ -50,6 +55,7 @@ export async function POST(req: NextRequest) {
         filename: file.name,
         csvContent,
         uploadedAt: new Date().toISOString(),
+        userName,
       }),
     });
 

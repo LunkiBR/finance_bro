@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { genai, financeTools, executeTool, SYSTEM_PROMPT, buildContextSnapshot } from "@/lib/claude";
+import { genai, financeTools, executeTool, getSystemPrompt, buildContextSnapshot } from "@/lib/claude";
 import { db } from "@/db";
-import { chatMessages, conversations } from "@/db/schema";
+import { chatMessages, conversations, userProfile } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import type { ChartSpec } from "@/lib/chart-types";
 
@@ -73,11 +73,16 @@ export async function POST(req: NextRequest) {
           console.error("Chat: falha ao salvar mensagem do usuário:", dbErr);
         }
 
+        // Fetch user info for personalization
+        const profileInfo = await db.select().from(userProfile).limit(1);
+        const userName = profileInfo[0]?.nome || "usuário";
+        const systemPrompt = getSystemPrompt(userName);
+
         // Build context snapshot (live financial state)
         const contextSnapshot = await buildContextSnapshot();
         const systemInstructionWithContext = contextSnapshot
-          ? `${SYSTEM_PROMPT}\n\n${contextSnapshot}`
-          : SYSTEM_PROMPT;
+          ? `${systemPrompt}\n\n${contextSnapshot}`
+          : systemPrompt;
 
         const model = genai.getGenerativeModel({
           model: "gemini-2.5-flash",

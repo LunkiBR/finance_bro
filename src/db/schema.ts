@@ -63,6 +63,7 @@ export const categoryRules = pgTable("category_rules", {
   id: uuid("id").defaultRandom().primaryKey(),
   keyword: text("keyword").notNull(),
   category: text("category").notNull(),
+  subcategory: text("subcategory"),
   type: transactionTypeEnum("type").notNull(),
   priority: integer("priority").notNull().default(0),
 });

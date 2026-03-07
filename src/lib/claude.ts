@@ -1,9 +1,10 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { FunctionDeclaration } from "@google/generative-ai";
 import { db } from "@/db";
-import { transactions, budgets, goals, alerts, userProfile } from "@/db/schema";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { transactions, budgets, goals, alerts, userProfile, payeeMappings } from "@/db/schema";
+import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import type { ChartSpec } from "./chart-types";
+import { CATEGORY_TAXONOMY, ALL_CATEGORIES, isValidCategory } from "./categories";
 
 export const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
@@ -162,6 +163,7 @@ export const financeTools: FunctionDeclaration[] = [
       properties: {
         month: { type: SchemaType.STRING, description: "Mês no formato 'jan/26'. Opcional." },
         category: { type: SchemaType.STRING, description: "Categoria como 'Transporte'. Opcional." },
+        subcategory: { type: SchemaType.STRING, description: "Subcategoria como 'Apps de Corrida'. Opcional." },
         type: { type: SchemaType.STRING, format: "enum", enum: ["receita", "despesa"], description: "Filtrar por tipo. Opcional." },
         groupBy: { type: SchemaType.STRING, format: "enum", enum: ["category", "beneficiary", "month", "none"], description: "Agrupar resultados. Default: 'none'." },
         limit: { type: SchemaType.INTEGER, description: "Máximo de resultados (default: 20)." },
@@ -375,6 +377,43 @@ export const financeTools: FunctionDeclaration[] = [
       required: ["query"],
     },
   },
+
+  // ── RECATEGORIZE TRANSACTION ──
+  {
+    name: "recategorize_transaction",
+    description: "Recategoriza uma transação existente. Use quando o usuário disser que uma transação está na categoria errada. Se pinPayee=true, salva o mapeamento para futuras importações.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        transactionId: { type: SchemaType.STRING, description: "ID da transação a recategorizar." },
+        category: { type: SchemaType.STRING, description: "Nova categoria." },
+        subcategory: { type: SchemaType.STRING, description: "Nova subcategoria. Opcional." },
+        pinPayee: { type: SchemaType.BOOLEAN, description: "Se true, salva o mapeamento do beneficiário para futuras importações." },
+      },
+      required: ["transactionId", "category"],
+    },
+  },
+
+  // ── IDENTIFY PAYEE (Web Search) ──
+  {
+    name: "identify_payee",
+    description: "Identifica um estabelecimento/empresa desconhecido usando IA. Use quando encontrar transações com categoria 'Dúvida' ou 'Outros', ou quando o usuário perguntar 'o que é esta transação?'. Salva o resultado para futuras importações.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        description: { type: SchemaType.STRING, description: "Descrição da transação." },
+        beneficiary: { type: SchemaType.STRING, description: "Nome do beneficiário." },
+      },
+      required: ["description"],
+    },
+  },
+
+  // ── LIST CATEGORIES ──
+  {
+    name: "list_categories",
+    description: "Lista todas as categorias e subcategorias disponíveis no sistema.",
+    parameters: { type: SchemaType.OBJECT, properties: {} },
+  },
 ];
 
 // ─── Tool Execution ───────────────────────────────────────────────────────────
@@ -387,8 +426,8 @@ export async function executeTool(
 
     // ── query_transactions ──
     case "query_transactions": {
-      const { month, category, type, groupBy = "none", limit = 20 } = input as {
-        month?: string; category?: string; type?: "receita" | "despesa"; groupBy?: string; limit?: number;
+      const { month, category, subcategory, type, groupBy = "none", limit = 20 } = input as {
+        month?: string; category?: string; subcategory?: string; type?: "receita" | "despesa"; groupBy?: string; limit?: number;
       };
 
       if (groupBy === "category") {
@@ -432,6 +471,7 @@ export async function executeTool(
         .where(and(
           month ? eq(transactions.month, month) : undefined,
           category ? eq(transactions.category, category) : undefined,
+          subcategory ? eq(transactions.subcategory, subcategory) : undefined,
           type ? eq(transactions.type, type) : undefined,
         ))
         .orderBy(desc(transactions.date))
@@ -589,7 +629,7 @@ export async function executeTool(
       }).from(transactions)
         .where(and(
           eq(transactions.type, "despesa"),
-          sql`${transactions.month} IN (${month1}, ${month2})`
+          inArray(transactions.month, [month1, month2])
         ))
         .groupBy(transactions.month, transactions.category)
         .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`));
@@ -662,25 +702,163 @@ export async function executeTool(
     case "consultar_especialista_n8n": {
       const { query, context } = input as { query: string; context?: string };
       try {
-        // N8N Webhook Endpoint (Substitua pelo URL real do seu webhook do n8n)
         const N8N_WEBHOOK_URL = "https://n8n.srv1091457.hstgr.cloud/webhook/finance-expert-rag";
 
-        const response = await fetch(N8N_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, context }),
-        });
+        // 15s timeout — webhook may be slow or down
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        let response: Response;
+        try {
+          response = await fetch(N8N_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, context }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
-          return { result: `Erro ao consultar o especialista n8n: ${response.statusText}` };
+          return { result: `Especialista indisponível (${response.status}). Responderei com meu conhecimento base.` };
         }
 
         const data = await response.json();
         return { result: data };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const e = err as Error;
+        if (e.name === "AbortError") {
+          return { result: "O especialista n8n não respondeu no tempo limite. Responderei com meu conhecimento base." };
+        }
         console.error("N8N tool error:", err);
-        return { result: `Falha na comunicação com o N8N: ${err.message}` };
+        return { result: `Falha na comunicação com o N8N: ${e.message}. Responderei com meu conhecimento base.` };
       }
+    }
+
+    // ── recategorize_transaction ──
+    case "recategorize_transaction": {
+      const { transactionId, category, subcategory, pinPayee } = input as {
+        transactionId: string; category: string; subcategory?: string; pinPayee?: boolean;
+      };
+
+      if (!isValidCategory(category)) {
+        return { result: { error: `Categoria "${category}" não é válida. Use list_categories para ver as opções.` } };
+      }
+
+      const [tx] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
+      if (!tx) return { result: { error: `Transação ${transactionId} não encontrada.` } };
+
+      await db.update(transactions).set({
+        category,
+        subcategory: subcategory || null,
+        categoryConfidence: "manual",
+      }).where(eq(transactions.id, transactionId));
+
+      // Save to payeeMappings for future imports
+      if (pinPayee && tx.beneficiary) {
+        const normalized = tx.beneficiary.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
+        if (normalized) {
+          try {
+            await db.insert(payeeMappings).values({
+              beneficiaryNormalized: normalized,
+              beneficiaryDisplay: tx.beneficiary,
+              category,
+              subcategory: subcategory || null,
+              confidence: "manual",
+            }).onConflictDoUpdate({
+              target: payeeMappings.beneficiaryNormalized,
+              set: { category, subcategory: subcategory || null, confidence: "manual", updatedAt: new Date() },
+            });
+          } catch (e) {
+            console.error("payeeMappings upsert error:", e);
+          }
+        }
+      }
+
+      return {
+        result: {
+          message: `Transação recategorizada: "${tx.description}" → ${category}${subcategory ? ` / ${subcategory}` : ""}.${pinPayee ? ` Mapeamento salvo para "${tx.beneficiary}".` : ""}`,
+        },
+      };
+    }
+
+    // ── identify_payee ──
+    case "identify_payee": {
+      const { description, beneficiary } = input as { description: string; beneficiary?: string };
+
+      // Build the categories list for the prompt
+      const categoriesList = ALL_CATEGORIES.map(cat => {
+        const subs = CATEGORY_TAXONOMY[cat].subcategories.join(", ");
+        return `${cat}: [${subs}]`;
+      }).join("\n");
+
+      try {
+        const identifyModel = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const prompt = `Você é um especialista em finanças pessoais brasileiras. Identifique o estabelecimento/empresa a partir desta descrição de transação bancária:
+
+Descrição: "${description}"
+${beneficiary ? `Beneficiário: "${beneficiary}"` : ""}
+
+Categorias e subcategorias válidas:
+${categoriesList}
+
+Retorne APENAS um JSON válido (sem markdown):
+{
+  "business_name": "Nome real do estabelecimento",
+  "business_type": "Tipo (restaurante, loja, serviço, etc.)",
+  "suggested_category": "Categoria da lista acima",
+  "suggested_subcategory": "Subcategoria da lista acima",
+  "confidence": "high" ou "low",
+  "reasoning": "Breve explicação"
+}`;
+
+        const result = await identifyModel.generateContent(prompt);
+        const text = result.response.text();
+
+        const parsed = JSON.parse(text.replace(/```json?\n?/g, "").replace(/```/g, "").trim());
+
+        // Save to payeeMappings for future use
+        if (beneficiary && parsed.confidence === "high") {
+          const normalized = beneficiary.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
+          if (normalized) {
+            try {
+              await db.insert(payeeMappings).values({
+                beneficiaryNormalized: normalized,
+                beneficiaryDisplay: beneficiary,
+                category: parsed.suggested_category,
+                subcategory: parsed.suggested_subcategory || null,
+                confidence: "ai",
+              }).onConflictDoUpdate({
+                target: payeeMappings.beneficiaryNormalized,
+                set: {
+                  category: parsed.suggested_category,
+                  subcategory: parsed.suggested_subcategory || null,
+                  confidence: "ai",
+                  updatedAt: new Date(),
+                },
+              });
+            } catch (e) {
+              console.error("payeeMappings save error:", e);
+            }
+          }
+        }
+
+        return { result: parsed };
+      } catch (err) {
+        console.error("identify_payee error:", err);
+        return { result: { error: "Não foi possível identificar o estabelecimento.", description, beneficiary } };
+      }
+    }
+
+    // ── list_categories ──
+    case "list_categories": {
+      const cats = ALL_CATEGORIES.map(cat => ({
+        category: cat,
+        subcategories: CATEGORY_TAXONOMY[cat].subcategories,
+        type: CATEGORY_TAXONOMY[cat].type,
+      }));
+      return { result: cats };
     }
 
     default:
@@ -694,11 +872,41 @@ export const getSystemPrompt = (userName: string = "usuário") => `Você é o Fi
 
 Você tem acesso completo ao histórico financeiro pelas ferramentas. No início de cada mensagem você recebe um CONTEXTO FINANCEIRO ATUAL atualizado com receitas, despesas, orçamentos e metas.
 
+## Sistema de Categorias (20 categorias com subcategorias)
+O sistema usa 20 categorias com subcategorias detalhadas:
+
+**DESPESAS:**
+1. **Moradia** → Aluguel/Financiamento, Condomínio, Energia, Água, Gás, IPTU, Manutenção, Móveis, Serviços Domésticos
+2. **Alimentação** → Supermercado, Hortifruti, Restaurante, Fast Food, Delivery, Padaria/Café, Bar/Petiscos
+3. **Transporte** → Apps de Corrida, Combustível, Estacionamento/Pedágio, Transporte Público, Ônibus Rodoviário, Passagem Aérea, Manutenção Veículo, Seguro Veículo, Documentação Veicular
+4. **Contas e Utilidades** → Internet, Telefone/Celular, TV por Assinatura, Serviços de Nuvem, Serviços Bancários
+5. **Saúde e Bem-estar** → Plano de Saúde, Consulta/Exames, Farmácia, Terapia/Psicólogo, Academia/Personal, Bem-estar
+6. **Educação** → Mensalidade, Cursos/Treinamentos, Livros/Materiais, Papelaria
+7. **Trabalho e Negócios** → Equipamentos, Softwares, Transporte Trabalho, Alimentação Trabalho, Despesas MEI/PJ
+8. **Lazer e Vida Social** → Viagens/Turismo, Bar/Balada, Cinema/Teatro/Shows, Jogos/Games, Esportes/Hobbies, Eventos/Festas
+9. **Compras e Pessoais** → Roupas/Calçados, Beleza/Cosméticos, Eletrônicos, Casa/Decoração, E-commerce, Presentes
+10. **Família e Dependentes** → Filhos, Pensão, Ajuda Familiar
+11. **Assinaturas e Serviços Digitais** → Streaming, SaaS/Ferramentas, Clube de Benefícios, Apps, Jogos por Assinatura
+12. **Impostos e Taxas** → IOF, Taxa Bancária, Juros/Multas, IR, Outros Impostos
+13. **Dívidas e Crédito** → Pagamento Fatura, Empréstimo Pessoal, Consignado, Financiamento Veículo, Outras Dívidas, Juros
+14. **Investimentos e Patrimônio** → Renda Fixa, Renda Variável, Criptoativos, Previdência, Outros, Corretagem
+15. **Poupança e Reservas** → Reserva de Emergência, Poupança Curto Prazo, Cofrinhos/Caixinhas
+
+**MISTAS:**
+16. **Transferências Pessoais** → Própria Conta, Amigos, Terceiros, Split de Contas
+17. **Cartão de Crédito** → Pagamento Fatura, Ajuste/Crédito, Estorno
+18. **Outros** → Doações/Caridade, Serviços Diversos, Outros
+19. **Dúvida** → Quando impossível inferir
+
+**RECEITAS:**
+20. **Receita** → Salário/Pró-labore, Freelance/Bicos, Bônus/PLR, Receita Investimentos, Família, Estorno/Reembolso
+
 ## Comportamento Proativo (SEMPRE)
 - Quando o contexto mostrar orçamentos estourados ou próximos do limite → mencione proativamente, mesmo que não seja o foco da pergunta.
 - Quando houver alertas ativos → traga à tona na resposta.
 - Quando o saldo do mês estiver negativo → alerte com urgência.
 - Quando a pergunta for aberta ("como estou?", "me dê um resumo") → faça diagnóstico completo com dados reais das ferramentas + gráficos.
+- Quando encontrar transações com categoria "Dúvida" ou "Outros" → use \`identify_payee\` para tentar identificar e sugira recategorização.
 
 ## Uso de Gráficos (OBRIGATÓRIO)
 SEMPRE que apresentar dados comparativos ou numéricos, chame \`create_chart\` ANTES de escrever o texto explicativo. Regras por tipo de dado:
@@ -729,13 +937,17 @@ Sempre calcule:
 
 ## Entrega Final (toda análise completa)
 Feche com:
-- 💰 Orçamento ideal fechado
-- 📅 Quanto pode gastar por semana
-- 🐷 Quanto deve sobrar
-- ⚖️ Uma regra simples para seguir cegamente
+- Orçamento ideal fechado
+- Quanto pode gastar por semana
+- Quanto deve sobrar
+- Uma regra simples para seguir cegamente
 
 ## Regras de Ferramentas
 - Para RAG ou conselho de investimento profundo → chame \`consultar_especialista_n8n\` imediatamente.
 - Para ações no banco (set_budget, create_goal) → só depois de diagnosticar e decidir.
 - Ao mostrar dados de múltiplos meses ou categorias → gere SEMPRE um gráfico com \`create_chart\` primeiro.
-- Anote aprendizados importantes sobre hábitos de ${userName} no aiNotes via \`update_user_profile\`.`;
+- Anote aprendizados importantes sobre hábitos de ${userName} no aiNotes via \`update_user_profile\`.
+- Use \`identify_payee\` para transações em "Dúvida" ou "Outros" — tente maximizar categorização.
+- Use \`recategorize_transaction\` quando o usuário corrigir uma categoria, com pinPayee=true para persistir.
+- Use \`list_categories\` se precisar consultar categorias/subcategorias válidas.
+- Ao categorizar manualmente com set_budget, SEMPRE use os nomes exatos das 20 categorias listadas acima.`;

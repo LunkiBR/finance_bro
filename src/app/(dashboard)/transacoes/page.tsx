@@ -13,6 +13,7 @@ interface Transaction {
     description: string;
     beneficiary: string;
     category: string;
+    subcategory?: string | null;
     type: "receita" | "despesa";
     amount: string;
     categoryConfidence?: "high" | "low" | "manual" | null;
@@ -49,11 +50,11 @@ export default function TransacoesPage() {
             .catch(() => setLoading(false));
     }, [month, category, type, search, page]);
 
-    async function updateCategory(txId: string, newCategory: string) {
+    async function updateCategory(txId: string, newCategory: string, newSubcategory?: string) {
         await fetch(`/api/transactions/${txId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ category: newCategory }),
+            body: JSON.stringify({ category: newCategory, subcategory: newSubcategory || null, pinPayee: true }),
         });
 
         // Update locally
@@ -61,7 +62,7 @@ export default function TransacoesPage() {
             setData({
                 ...data,
                 transactions: data.transactions.map((tx) =>
-                    tx.id === txId ? { ...tx, category: newCategory, categoryConfidence: "manual" as const } : tx
+                    tx.id === txId ? { ...tx, category: newCategory, subcategory: newSubcategory || null, categoryConfidence: "manual" as const } : tx
                 ),
             });
         }
@@ -199,13 +200,15 @@ export default function TransacoesPage() {
                                         <td className="py-2 px-2 relative">
                                             <CategoryBadge
                                                 category={tx.category}
+                                                subcategory={tx.subcategory}
                                                 confidence={tx.categoryConfidence}
                                                 onClick={() => setEditingId(editingId === tx.id ? null : tx.id)}
                                             />
                                             {editingId === tx.id && (
                                                 <CategoryPicker
                                                     current={tx.category}
-                                                    onSelect={(cat) => updateCategory(tx.id, cat)}
+                                                    currentSubcategory={tx.subcategory}
+                                                    onSelect={(cat, sub) => updateCategory(tx.id, cat, sub)}
                                                     onClose={() => setEditingId(null)}
                                                 />
                                             )}

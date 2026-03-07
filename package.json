@@ -11,7 +11,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "dotenv -e .env.local -- drizzle-kit push",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
-    "db:seed": "dotenv -e .env.local -- npx tsx src/db/seed-rules.ts"
+    "db:seed": "dotenv -e .env.local -- npx tsx src/db/seed-rules.ts",
+    "db:migrate-categories": "dotenv -e .env.local -- npx tsx src/db/migrate-categories.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

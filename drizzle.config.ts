@@ -11,4 +11,6 @@ export default {
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
+  // Exclude third-party views that cause drizzle-kit schema parsing errors
+  tablesFilter: ["!feedback_with_chunks"],
 } satisfies Config;

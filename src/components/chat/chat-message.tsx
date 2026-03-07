@@ -8,9 +8,11 @@ interface ChatMessageProps {
     content: string;
     chartSpec?: ChartSpec | null;
     isStreaming?: boolean;
+    retryable?: boolean;
+    onRetry?: () => void;
 }
 
-export function ChatMessage({ role, content, chartSpec, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ role, content, chartSpec, isStreaming, retryable, onRetry }: ChatMessageProps) {
     if (role === "user") {
         // ChatGPT user bubble: blue, right-aligned, ~12px radius, tighter padding
         return (
@@ -54,8 +56,24 @@ export function ChatMessage({ role, content, chartSpec, isStreaming }: ChatMessa
                     </div>
                 </div>
             )}
+            {/* Retry button for retryable errors */}
+            {!isStreaming && retryable && onRetry && (
+                <button
+                    onClick={onRetry}
+                    className="mt-3 px-4 py-2 rounded-lg text-[13px] font-medium transition-colors"
+                    style={{
+                        background: "var(--bg-elevated)",
+                        color: "var(--text-primary)",
+                        border: "1px solid var(--border)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
+                >
+                    Tentar novamente
+                </button>
+            )}
             {/* Action row — hidden until hover, like ChatGPT */}
-            {!isStreaming && content && (
+            {!isStreaming && content && !retryable && (
                 <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                         onClick={() => navigator.clipboard.writeText(content)}

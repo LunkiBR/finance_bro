@@ -1,24 +1,31 @@
-export const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-    "Alimentação": { bg: "rgba(245, 158, 11, 0.12)", text: "#F59E0B", dot: "#F59E0B" },
-    "Transporte": { bg: "rgba(59, 130, 246, 0.12)", text: "#3B82F6", dot: "#3B82F6" },
-    "Moradia": { bg: "rgba(139, 92, 246, 0.12)", text: "#8B5CF6", dot: "#8B5CF6" },
-    "Lazer": { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
-    "Assinaturas": { bg: "rgba(99, 102, 241, 0.12)", text: "#6366F1", dot: "#6366F1" },
-    "Saúde": { bg: "rgba(229, 72, 77, 0.12)", text: "#E5484D", dot: "#E5484D" },
-    "Educação": { bg: "rgba(6, 182, 212, 0.12)", text: "#06B6D4", dot: "#06B6D4" },
-    "Salário": { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
-    "Receita": { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
-    "Roupas": { bg: "rgba(236, 72, 153, 0.12)", text: "#EC4899", dot: "#EC4899" },
-    "Outros": { bg: "rgba(77, 82, 96, 0.12)", text: "#8A8F98", dot: "#4D5260" },
-};
+/**
+ * Re-exporta dados de categorias de categories.ts (fonte de verdade).
+ * Mantém compatibilidade com imports existentes no projeto.
+ */
+import {
+  CATEGORY_TAXONOMY,
+  ALL_CATEGORIES as CATS,
+  EXPENSE_CATEGORIES as EXP_CATS,
+  CHART_COLORS as COLORS,
+  getCategoryColor as getColor,
+  LEGACY_CATEGORY_MAP,
+} from "./categories";
 
-export const CHART_COLORS = ["#00A67E", "#3B82F6", "#F59E0B", "#7C3AED", "#E5484D", "#06B6D4", "#6366F1", "#EC4899"];
-
-export function getCategoryColor(category: string) {
-    return CATEGORY_COLORS[category] || CATEGORY_COLORS["Outros"];
+// Build CATEGORY_COLORS from taxonomy (backward-compatible shape)
+export const CATEGORY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {};
+for (const [cat, data] of Object.entries(CATEGORY_TAXONOMY)) {
+  CATEGORY_COLORS[cat] = data.color;
+}
+// Add legacy names for backward-compat during transition
+for (const [legacy, mapped] of Object.entries(LEGACY_CATEGORY_MAP)) {
+  if (!(legacy in CATEGORY_COLORS) && mapped.category in CATEGORY_COLORS) {
+    CATEGORY_COLORS[legacy] = CATEGORY_COLORS[mapped.category];
+  }
 }
 
-export const ALL_CATEGORIES = [
-    "Alimentação", "Transporte", "Moradia", "Lazer", "Assinaturas",
-    "Saúde", "Educação", "Roupas", "Salário", "Receita", "Outros",
-];
+export const CHART_COLORS = COLORS;
+export const ALL_CATEGORIES = CATS;
+export const EXPENSE_CATEGORIES = EXP_CATS;
+export function getCategoryColor(category: string) {
+  return getColor(category);
+}

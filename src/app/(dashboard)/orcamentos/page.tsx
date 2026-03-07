@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MonthSelector } from "@/components/transactions/month-selector";
-import { getCategoryColor, ALL_CATEGORIES } from "@/lib/category-colors";
+import { getCategoryColor, EXPENSE_CATEGORIES } from "@/lib/category-colors";
 import { getCurrentMonth } from "@/lib/utils";
 import { Plus, X } from "lucide-react";
 
@@ -21,7 +21,7 @@ export default function OrcamentosPage() {
     const [budgets, setBudgets] = useState<BudgetData[]>([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
-    const [form, setForm] = useState({ category: ALL_CATEGORIES[0], limitAmount: "" });
+    const [form, setForm] = useState({ category: EXPENSE_CATEGORIES[0], limitAmount: "" });
 
     useEffect(() => {
         setLoading(true);
@@ -39,7 +39,7 @@ export default function OrcamentosPage() {
             body: JSON.stringify({ category: form.category, month, limitAmount: form.limitAmount }),
         });
         setShowModal(false);
-        setForm({ category: ALL_CATEGORIES[0], limitAmount: "" });
+        setForm({ category: EXPENSE_CATEGORIES[0], limitAmount: "" });
         // Refresh
         const res = await fetch(`/api/budgets?month=${month}`);
         setBudgets(await res.json());
@@ -132,7 +132,7 @@ export default function OrcamentosPage() {
                                     className="w-full px-3 py-2 rounded-[6px] border text-[13px]"
                                     style={{ background: "var(--bg-elevated)", borderColor: "var(--border)", color: "var(--text-primary)" }}
                                 >
-                                    {ALL_CATEGORIES.filter((c) => c !== "Receita" && c !== "Salário").map((c) => (
+                                    {EXPENSE_CATEGORIES.map((c) => (
                                         <option key={c} value={c}>{c}</option>
                                     ))}
                                 </select>

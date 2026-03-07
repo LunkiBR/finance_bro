@@ -16,6 +16,7 @@ export default function CopilotoPage() {
         sendMessage,
         loadConversation,
         resetConversation,
+        retryLastMessage,
     } = useChatStream();
 
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -66,6 +67,8 @@ export default function CopilotoPage() {
                                         content={msg.content}
                                         chartSpec={msg.chartSpec}
                                         isStreaming={msg.isStreaming}
+                                        retryable={msg.retryable}
+                                        onRetry={msg.retryable ? retryLastMessage : undefined}
                                     />
                                 ))}
                                 {currentTool && <ToolIndicator tool={currentTool} />}

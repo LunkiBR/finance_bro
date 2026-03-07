@@ -9,6 +9,8 @@ export interface ChatStreamMessage {
     content: string;
     chartSpec?: ChartSpec | null;
     isStreaming?: boolean;
+    errorType?: string;
+    retryable?: boolean;
 }
 
 export function useChatStream() {
@@ -136,10 +138,16 @@ export function useChatStream() {
                                 const updated = [...prev];
                                 const last = updated[updated.length - 1];
                                 if (last.role === "assistant") {
+                                    const existingContent = last.content;
+                                    const errorMsg = data.message || "Erro ao processar resposta.";
                                     updated[updated.length - 1] = {
                                         ...last,
-                                        content: "⚠️ " + (data.message || "Erro ao processar resposta."),
+                                        content: existingContent
+                                            ? existingContent + "\n\n⚠️ " + errorMsg
+                                            : "⚠️ " + errorMsg,
                                         isStreaming: false,
+                                        errorType: data.errorType,
+                                        retryable: data.retryable,
                                     };
                                 }
                                 return updated;
@@ -171,6 +179,24 @@ export function useChatStream() {
         }
     }, [conversationId]);
 
+    const retryLastMessage = useCallback(() => {
+        // Find the last user message and resend it
+        const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+        if (!lastUserMsg) return;
+
+        // Remove the failed assistant message and the user message
+        setMessages((prev) => {
+            const idx = prev.findLastIndex((m) => m.role === "user");
+            if (idx === -1) return prev;
+            return prev.slice(0, idx);
+        });
+
+        // Resend after a brief delay
+        setTimeout(() => {
+            sendMessage(lastUserMsg.content);
+        }, 500);
+    }, [messages, sendMessage]);
+
     return {
         messages,
         isLoading,
@@ -179,5 +205,6 @@ export function useChatStream() {
         sendMessage,
         loadConversation,
         resetConversation,
+        retryLastMessage,
     };
 }

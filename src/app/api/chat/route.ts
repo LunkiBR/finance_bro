@@ -8,6 +8,8 @@ import type { ChartSpec } from "@/lib/chart-types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const MAX_TOOL_ITERATIONS = 10;
+
 export async function POST(req: NextRequest) {
   try {
     const { message, conversationId } = (await req.json()) as {
@@ -95,21 +97,58 @@ export async function POST(req: NextRequest) {
           systemInstruction: systemInstructionWithContext,
         });
 
-        const conversationHistory = history
+        // Build raw history from DB (ASC order after reverse)
+        const rawHistory = history
           .reverse()
           .map((m) => ({
-            role: m.role === "user" ? "user" : "model",
-            parts: [{ text: m.content }],
-          }))
-          .concat([{ role: "user" as const, parts: [{ text: message }] }]);
+            role: (m.role === "user" ? "user" : "model") as "user" | "model",
+            // Guard against empty text — Gemini rejects empty parts
+            parts: [{ text: m.content || " " }],
+          }));
+
+        // Repair history: remove consecutive same-role turns and orphaned trailing user messages.
+        // This prevents INVALID_ARGUMENT when a previous request saved the user message
+        // but failed before saving the assistant response.
+        const repairedHistory: typeof rawHistory = [];
+        for (const item of rawHistory) {
+          const prev = repairedHistory[repairedHistory.length - 1];
+          if (prev && prev.role === item.role) {
+            // Drop the older duplicate; keep the newer one
+            repairedHistory.pop();
+          }
+          repairedHistory.push(item);
+        }
+        // History passed to startChat must end with "model" (completed pairs)
+        while (repairedHistory.length > 0 && repairedHistory[repairedHistory.length - 1].role === "user") {
+          repairedHistory.pop();
+        }
+
+        const conversationHistory = repairedHistory.concat([
+          { role: "user" as const, parts: [{ text: message }] },
+        ]);
 
         const chat = model.startChat({
           history: conversationHistory.slice(0, -1),
         });
 
         let continueLoop = true;
+        let iterations = 0;
 
         while (continueLoop) {
+          iterations++;
+
+          // Guard against infinite tool loops
+          if (iterations > MAX_TOOL_ITERATIONS) {
+            console.warn(`Chat: max tool iterations (${MAX_TOOL_ITERATIONS}) reached`);
+            const warningMsg = "\n\nAtingi o limite de consultas para esta pergunta. Aqui está o que encontrei até agora.";
+            fullResponse += warningMsg;
+            await writer.write(
+              encoder.encode(`data: ${JSON.stringify({ type: "text", text: warningMsg })}\n\n`)
+            );
+            continueLoop = false;
+            break;
+          }
+
           const lastParts = conversationHistory[conversationHistory.length - 1].parts;
           const response = await chat.sendMessage(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,16 +167,35 @@ export async function POST(req: NextRequest) {
                 )
               );
 
-              const { result, chartSpec: cs } = await executeTool(
-                fc.name,
-                fc.args as Record<string, unknown>
-              );
+              // Per-tool try/catch — one tool failure doesn't crash the stream
+              try {
+                const { result, chartSpec: cs } = await executeTool(
+                  fc.name,
+                  fc.args as Record<string, unknown>
+                );
 
-              if (cs) chartSpec = cs;
+                if (cs) chartSpec = cs;
 
-              functionResults.push({
-                functionResponse: { name: fc.name, response: result },
-              });
+                // Gemini FunctionResponse.response maps to protobuf Struct which only
+                // accepts plain JSON objects (string-keyed). Wrap non-object results.
+                const responseValue =
+                  typeof result === "object" && result !== null && !Array.isArray(result)
+                    ? (result as object)
+                    : { result }; // wraps arrays, strings, numbers, null
+
+                functionResults.push({
+                  functionResponse: { name: fc.name, response: responseValue },
+                });
+              } catch (toolErr: unknown) {
+                const errMsg = toolErr instanceof Error ? toolErr.message : String(toolErr);
+                console.error(`Tool ${fc.name} error:`, toolErr);
+                functionResults.push({
+                  functionResponse: {
+                    name: fc.name,
+                    response: { error: `Erro ao executar ${fc.name}: ${errMsg}` },
+                  },
+                });
+              }
             }
 
             conversationHistory.push({
@@ -205,11 +263,57 @@ export async function POST(req: NextRequest) {
         await writer.write(
           encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
         );
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Chat error:", err);
+
+        let userMessage = "Erro ao processar resposta.";
+        let errorType = "unknown";
+        let retryable = false;
+
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errStatus = (err as { status?: number })?.status;
+
+        // Classify error for specific user feedback
+        if (errStatus === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429")) {
+          userMessage = "O serviço de IA está temporariamente sobrecarregado. Tente novamente em alguns segundos.";
+          errorType = "rate_limit";
+          retryable = true;
+        } else if (errStatus === 400 || errMsg.includes("INVALID_ARGUMENT")) {
+          userMessage = "Erro na comunicação com a IA. A mensagem pode ter sido muito longa ou conter conteúdo inválido.";
+          errorType = "invalid_request";
+        } else if (errMsg.includes("SAFETY") || errMsg.includes("blocked")) {
+          userMessage = "A IA não conseguiu processar essa pergunta por restrições de segurança. Tente reformular.";
+          errorType = "safety_filter";
+        } else if (errMsg.includes("fetch") || errMsg.includes("ECONNREFUSED") || errMsg.includes("ENOTFOUND")) {
+          userMessage = "Erro de conexão com o servidor de IA. Verifique sua conexão de internet.";
+          errorType = "network";
+          retryable = true;
+        } else if (errMsg.includes("timeout") || errMsg.includes("ETIMEDOUT") || errMsg.includes("deadline")) {
+          userMessage = "A consulta demorou demais para processar. Tente uma pergunta mais simples.";
+          errorType = "timeout";
+          retryable = true;
+        } else if (errMsg.includes("quota") || errMsg.includes("billing")) {
+          userMessage = "Cota da API de IA excedida. Entre em contato com o administrador.";
+          errorType = "quota";
+        } else {
+          // Include truncated error detail for debugging
+          userMessage = `Erro ao processar resposta: ${errMsg.slice(0, 150)}`;
+          retryable = true;
+        }
+
+        // If there's partial response, send it before the error
+        if (fullResponse.length > 0) {
+          await writer.write(
+            encoder.encode(`data: ${JSON.stringify({
+              type: "text",
+              text: "\n\n---\n_[Resposta interrompida por erro]_"
+            })}\n\n`)
+          );
+        }
+
         await writer.write(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "error", message: "Erro ao processar resposta." })}\n\n`
+            `data: ${JSON.stringify({ type: "error", message: userMessage, errorType, retryable })}\n\n`
           )
         );
       } finally {
@@ -226,7 +330,8 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return new Response(JSON.stringify({ error: "Erro interno." }), {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: `Erro interno: ${errMsg.slice(0, 200)}` }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

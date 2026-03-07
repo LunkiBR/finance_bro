@@ -21,6 +21,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Energia",
       "Água e Esgoto",
       "Gás",
+      "Internet",
       "IPTU",
       "Manutenção e Reparos",
       "Móveis e Eletrodomésticos",
@@ -34,12 +35,13 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
   "Alimentação": {
     subcategories: [
       "Supermercado",
-      "Hortifruti / Feira",
+      "Hortifruti",
       "Restaurante",
       "Fast Food",
       "Delivery",
       "Padaria e Café",
-      "Bar e Petiscos",
+      "Cafeteria",
+      "Bar e Petisco",
     ],
     color: { bg: "rgba(245, 158, 11, 0.12)", text: "#F59E0B", dot: "#F59E0B" },
     type: "despesa",
@@ -48,7 +50,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
   // 3. Transporte
   "Transporte": {
     subcategories: [
-      "Apps de Corrida",
+      "Apps",
       "Combustível",
       "Estacionamento / Pedágio",
       "Transporte Público",
@@ -75,14 +77,14 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
     type: "despesa",
   },
 
-  // 5. Saúde e Bem-estar
-  "Saúde e Bem-estar": {
+  // 5. Saúde e Bem-Estar
+  "Saúde e Bem-Estar": {
     subcategories: [
       "Plano de Saúde",
-      "Consulta / Exames",
-      "Farmácia / Medicamentos",
+      "Consulta Médica",
+      "Farmácia",
       "Terapia / Psicólogo",
-      "Academia / Personal",
+      "Academia",
       "Bem-estar",
     ],
     color: { bg: "rgba(229, 72, 77, 0.12)", text: "#E5484D", dot: "#E5484D" },
@@ -114,26 +116,26 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
     type: "despesa",
   },
 
-  // 8. Lazer e Vida Social
-  "Lazer e Vida Social": {
+  // 8. Lazer e Entretenimento
+  "Lazer e Entretenimento": {
     subcategories: [
-      "Viagens e Turismo",
+      "Viagem",
       "Bar e Balada",
-      "Cinema / Teatro / Shows",
+      "Cinema e Teatro",
       "Jogos e Games",
-      "Esportes e Hobbies",
+      "Esporte",
       "Eventos e Festas",
     ],
     color: { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
     type: "despesa",
   },
 
-  // 9. Compras e Pessoais
-  "Compras e Pessoais": {
+  // 9. Compras e E-commerce
+  "Compras e E-commerce": {
     subcategories: [
       "Roupas e Calçados",
       "Beleza e Cosméticos",
-      "Eletrônicos e Gadgets",
+      "Eletrônicos",
       "Casa e Decoração",
       "E-commerce Geral",
       "Presentes",
@@ -153,11 +155,13 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
     type: "despesa",
   },
 
-  // 11. Assinaturas e Serviços Digitais
-  "Assinaturas e Serviços Digitais": {
+  // 11. Assinaturas e Serviços
+  "Assinaturas e Serviços": {
     subcategories: [
       "Streaming",
       "SaaS e Ferramentas",
+      "Telefone e Celular",
+      "Seguro",
       "Clube de Benefícios",
       "Apps de Produtividade",
       "Jogos por Assinatura",
@@ -222,7 +226,8 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
   "Transferências Pessoais": {
     subcategories: [
       "Transferência Própria",
-      "Transferência para Amigos",
+      "Amigos",
+      "Conhecidos",
       "Transferência para Terceiros",
       "Split de Contas",
     ],
@@ -233,12 +238,12 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
   // 17. Receita
   "Receita": {
     subcategories: [
-      "Salário / Pró-labore",
-      "Freelance / Bicos",
+      "Salário e Repasse",
+      "Freelance",
       "Bônus / Comissões / PLR",
       "Receita de Investimentos",
-      "Família / Ajuda Financeira",
-      "Estorno / Reembolso",
+      "Família",
+      "Estorno",
       "Transferência Própria",
     ],
     color: { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
@@ -292,14 +297,20 @@ export const INCOME_CATEGORIES = ALL_CATEGORIES.filter(
 // ─── Mapeamento de Legado (Categorias Antigas → Novas) ──────────────────────
 
 export const LEGACY_CATEGORY_MAP: Record<string, { category: string; subcategory?: string }> = {
-  "Vestuário": { category: "Compras e Pessoais", subcategory: "Roupas e Calçados" },
-  "Roupas": { category: "Compras e Pessoais", subcategory: "Roupas e Calçados" },
-  "Saúde": { category: "Saúde e Bem-estar" },
-  "Assinaturas": { category: "Assinaturas e Serviços Digitais" },
-  "Lazer": { category: "Lazer e Vida Social" },
-  "Salário": { category: "Receita", subcategory: "Salário / Pró-labore" },
+  // Nomes antigos de categorias
+  "Vestuário": { category: "Compras e E-commerce", subcategory: "Roupas e Calçados" },
+  "Roupas": { category: "Compras e E-commerce", subcategory: "Roupas e Calçados" },
+  "Saúde": { category: "Saúde e Bem-Estar" },
+  "Assinaturas": { category: "Assinaturas e Serviços" },
+  "Lazer": { category: "Lazer e Entretenimento" },
+  "Salário": { category: "Receita", subcategory: "Salário e Repasse" },
   "Investimentos": { category: "Investimentos e Patrimônio" },
-  "Elytra (Empresa)": { category: "Receita", subcategory: "Freelance / Bicos" },
+  "Elytra (Empresa)": { category: "Receita", subcategory: "Freelance" },
+  // Nomes de categorias anteriores → novos (renomeações desta sprint)
+  "Saúde e Bem-estar": { category: "Saúde e Bem-Estar" },
+  "Assinaturas e Serviços Digitais": { category: "Assinaturas e Serviços" },
+  "Lazer e Vida Social": { category: "Lazer e Entretenimento" },
+  "Compras e Pessoais": { category: "Compras e E-commerce" },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

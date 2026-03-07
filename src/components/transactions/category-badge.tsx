@@ -26,7 +26,13 @@ export function CategoryBadge({ category, subcategory, confidence, onClick }: Ca
             {confidence === "low" && (
                 <span style={{ color: "var(--accent-amber)" }}>?</span>
             )}
-            {category}
+            <span className="shrink-0">{category}</span>
+            {subcategory && (
+                <>
+                    <span style={{ opacity: 0.5 }}>›</span>
+                    <span style={{ opacity: 0.9 }}>{subcategory}</span>
+                </>
+            )}
         </button>
     );
 }

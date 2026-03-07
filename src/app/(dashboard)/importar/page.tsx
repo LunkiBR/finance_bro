@@ -163,7 +163,7 @@ export default function ImportarPage() {
 
             {/* File list */}
             {files.length > 0 && (
-                <div className="rounded-[6px] border divide-y" style={{ borderColor: "var(--border)", divideColor: "var(--border)" }}>
+                <div className="rounded-[6px] border divide-y" style={{ borderColor: "var(--border)" }}>
                     {files.map((entry, idx) => (
                         <div
                             key={`${entry.file.name}-${idx}`}

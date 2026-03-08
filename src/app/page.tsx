@@ -4,10 +4,13 @@ import { db } from "@/db";
 import { userProfile } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
+const isValidUUID = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 export default async function Home() {
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.id || !isValidUUID(session.user.id)) {
     redirect("/login");
   }
 

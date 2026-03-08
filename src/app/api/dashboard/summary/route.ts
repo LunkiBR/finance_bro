@@ -3,8 +3,13 @@ import { db } from "@/db";
 import { transactions, budgets, goals } from "@/db/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { getCurrentMonth, getPrevMonth, formatBRL, monthToNum } from "@/lib/utils";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function GET(req: NextRequest) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     const month = req.nextUrl.searchParams.get("month") || getCurrentMonth();
     const prevMonth = getPrevMonth(month);
     const month2 = getPrevMonth(prevMonth);
@@ -19,7 +24,7 @@ export async function GET(req: NextRequest) {
                 count: sql<number>`COUNT(*)`,
             })
                 .from(transactions)
-                .where(eq(transactions.month, month))
+                .where(and(eq(transactions.userId, userId), eq(transactions.month, month)))
                 .groupBy(transactions.type),
 
             db.select({
@@ -27,7 +32,7 @@ export async function GET(req: NextRequest) {
                 total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
             })
                 .from(transactions)
-                .where(eq(transactions.month, prevMonth))
+                .where(and(eq(transactions.userId, userId), eq(transactions.month, prevMonth)))
                 .groupBy(transactions.type),
         ]);
 
@@ -48,7 +53,11 @@ export async function GET(req: NextRequest) {
                 count: sql<number>`COUNT(*)`,
             })
             .from(transactions)
-            .where(and(eq(transactions.month, month), eq(transactions.type, "despesa")))
+            .where(and(
+                eq(transactions.userId, userId),
+                eq(transactions.month, month),
+                eq(transactions.type, "despesa")
+            ))
             .groupBy(transactions.category)
             .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`));
 
@@ -60,6 +69,7 @@ export async function GET(req: NextRequest) {
                 total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
             })
             .from(transactions)
+            .where(eq(transactions.userId, userId))
             .groupBy(transactions.month, transactions.type)
             .orderBy(transactions.month);
 
@@ -74,7 +84,7 @@ export async function GET(req: NextRequest) {
             .slice(-6);
 
         // ── Budget status ─────────────────────────────────────────────────────
-        const budgetRows = await db.select().from(budgets).where(eq(budgets.month, month));
+        const budgetRows = await db.select().from(budgets).where(and(eq(budgets.userId, userId), eq(budgets.month, month)));
         const budgetStatus = budgetRows.map(b => ({
             ...b,
             spent: Number(b.spentAmount),
@@ -85,7 +95,7 @@ export async function GET(req: NextRequest) {
         }));
 
         // ── Goals ─────────────────────────────────────────────────────────────
-        const goalRows = await db.select().from(goals);
+        const goalRows = await db.select().from(goals).where(eq(goals.userId, userId));
         const goalsData = goalRows.map(g => ({
             ...g,
             current: Number(g.currentAmount),
@@ -99,7 +109,7 @@ export async function GET(req: NextRequest) {
         const recentTx = await db
             .select()
             .from(transactions)
-            .where(eq(transactions.month, month))
+            .where(and(eq(transactions.userId, userId), eq(transactions.month, month)))
             .orderBy(desc(transactions.date))
             .limit(5);
 
@@ -124,6 +134,7 @@ export async function GET(req: NextRequest) {
                 })
                 .from(transactions)
                 .where(and(
+                    eq(transactions.userId, userId),
                     inArray(transactions.month, [prevMonth, month2, month3]),
                     eq(transactions.category, topCat.category),
                     eq(transactions.type, "despesa")
@@ -212,7 +223,11 @@ export async function GET(req: NextRequest) {
                 total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
             })
             .from(transactions)
-            .where(and(eq(transactions.month, month), eq(transactions.type, "despesa")))
+            .where(and(
+                eq(transactions.userId, userId),
+                eq(transactions.month, month),
+                eq(transactions.type, "despesa")
+            ))
             .groupBy(transactions.beneficiary, transactions.category)
             .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`))
             .limit(1);

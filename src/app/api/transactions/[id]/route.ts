@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, payeeMappings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
 
 function normalizeBeneficiary(raw: string): string {
   return (raw || "")
@@ -18,6 +19,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authResult = await requireAuth();
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
   try {
     const { id } = await params;
     const body = await req.json();
@@ -36,14 +41,16 @@ export async function PATCH(
       updates.subcategory = body.subcategory;
     }
 
-    await db.update(transactions).set(updates).where(eq(transactions.id, id));
+    await db
+      .update(transactions)
+      .set(updates)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
 
-    // Se pinPayee: true, salva o mapeamento para uso futuro
     if (body.pinPayee && body.category) {
       const [tx] = await db
         .select({ beneficiary: transactions.beneficiary })
         .from(transactions)
-        .where(eq(transactions.id, id))
+        .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
         .limit(1);
 
       if (tx?.beneficiary) {
@@ -51,6 +58,7 @@ export async function PATCH(
         await db
           .insert(payeeMappings)
           .values({
+            userId,
             beneficiaryNormalized: normalized,
             beneficiaryDisplay: tx.beneficiary,
             category: body.category,
@@ -58,7 +66,7 @@ export async function PATCH(
             confidence: "manual",
           })
           .onConflictDoUpdate({
-            target: payeeMappings.beneficiaryNormalized,
+            target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
             set: {
               category: body.category,
               subcategory: body.subcategory || null,

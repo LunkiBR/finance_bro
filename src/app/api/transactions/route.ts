@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
 import { eq, and, sql, desc, ilike } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function GET(req: NextRequest) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     const params = req.nextUrl.searchParams;
     const month = params.get("month") || "";
     const category = params.get("category") || "";
@@ -14,13 +19,13 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
 
     try {
-        const conditions = [];
+        const conditions = [eq(transactions.userId, userId)];
         if (month) conditions.push(eq(transactions.month, month));
         if (category) conditions.push(eq(transactions.category, category));
         if (type) conditions.push(eq(transactions.type, type));
         if (search) conditions.push(ilike(transactions.description, `%${search}%`));
 
-        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        const where = and(...conditions);
 
         const [rows, countResult, summaryResult] = await Promise.all([
             db

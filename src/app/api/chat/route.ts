@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { chatMessages, conversations, userProfile } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import type { ChartSpec } from "@/lib/chart-types";
+import { requireAuth } from "@/lib/auth-guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -11,6 +12,10 @@ export const maxDuration = 60;
 const MAX_TOOL_ITERATIONS = 10;
 
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
   try {
     const { message, conversationId } = (await req.json()) as {
       message: string;
@@ -29,7 +34,7 @@ export async function POST(req: NextRequest) {
     if (!convId) {
       const [conv] = await db
         .insert(conversations)
-        .values({ title: "Nova conversa" })
+        .values({ userId, title: "Nova conversa" })
         .returning();
       convId = conv.id;
     }
@@ -67,6 +72,7 @@ export async function POST(req: NextRequest) {
         // Salva a mensagem do usuário
         try {
           await db.insert(chatMessages).values({
+            userId,
             conversationId: convId,
             role: "user",
             content: message,
@@ -76,12 +82,12 @@ export async function POST(req: NextRequest) {
         }
 
         // Fetch user info for personalization
-        const profileInfo = await db.select().from(userProfile).limit(1);
+        const profileInfo = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
         const userName = profileInfo[0]?.nome || "usuário";
         const systemPrompt = getSystemPrompt(userName);
 
         // Build context snapshot (live financial state)
-        const contextSnapshot = await buildContextSnapshot();
+        const contextSnapshot = await buildContextSnapshot(userId);
         const systemInstructionWithContext = contextSnapshot
           ? `${systemPrompt}\n\n${contextSnapshot}`
           : systemPrompt;
@@ -171,7 +177,8 @@ export async function POST(req: NextRequest) {
               try {
                 const { result, chartSpec: cs } = await executeTool(
                   fc.name,
-                  fc.args as Record<string, unknown>
+                  fc.args as Record<string, unknown>,
+                  userId
                 );
 
                 if (cs) chartSpec = cs;
@@ -234,6 +241,7 @@ export async function POST(req: NextRequest) {
         // Salva resposta do assistente
         try {
           await db.insert(chatMessages).values({
+            userId,
             conversationId: convId,
             role: "assistant",
             content: fullResponse,
@@ -339,11 +347,15 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // Keep backward compat — legacy history (not scoped by conversation)
+  const authResult = await requireAuth();
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
   try {
     const history = await db
       .select()
       .from(chatMessages)
+      .where(eq(chatMessages.userId, userId))
       .orderBy(desc(chatMessages.createdAt))
       .limit(50);
 

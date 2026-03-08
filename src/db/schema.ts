@@ -10,6 +10,8 @@ import {
   timestamp,
   pgEnum,
   boolean,
+  varchar,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -39,10 +41,24 @@ export const categoryConfidenceEnum = pgEnum("category_confidence", [
   "manual",
 ]);
 
+// ─── Users ────────────────────────────────────────────────────────────────────
+
+export const users = pgTable("ff_users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: varchar("email", { length: 255 }).unique().notNull(),
+  username: varchar("username", { length: 100 }).unique().notNull(),
+  passwordHash: text("password_hash").notNull(),
+  name: varchar("name", { length: 200 }),
+  role: varchar("role", { length: 20 }).notNull().default("user"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ─── Transações ──────────────────────────────────────────────────────────────
 
-export const transactions = pgTable("transactions", {
+export const transactions = pgTable("ff_transactions", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   date: date("date").notNull(),
   description: text("description").notNull(),
   beneficiary: text("beneficiary").notNull().default(""),
@@ -58,8 +74,9 @@ export const transactions = pgTable("transactions", {
 });
 
 // ─── Motor de categorização ───────────────────────────────────────────────────
+// category_rules is global (no user_id) — shared across all users
 
-export const categoryRules = pgTable("category_rules", {
+export const categoryRules = pgTable("ff_category_rules", {
   id: uuid("id").defaultRandom().primaryKey(),
   keyword: text("keyword").notNull(),
   category: text("category").notNull(),
@@ -70,8 +87,9 @@ export const categoryRules = pgTable("category_rules", {
 
 // ─── Orçamentos ───────────────────────────────────────────────────────────────
 
-export const budgets = pgTable("budgets", {
+export const budgets = pgTable("ff_budgets", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   category: text("category").notNull(),
   month: text("month").notNull(),
   limitAmount: numeric("limit_amount", { precision: 10, scale: 2 }).notNull(),
@@ -82,8 +100,9 @@ export const budgets = pgTable("budgets", {
 
 // ─── Metas ────────────────────────────────────────────────────────────────────
 
-export const goals = pgTable("goals", {
+export const goals = pgTable("ff_goals", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   targetAmount: numeric("target_amount", { precision: 10, scale: 2 }).notNull(),
   currentAmount: numeric("current_amount", { precision: 10, scale: 2 })
@@ -95,8 +114,9 @@ export const goals = pgTable("goals", {
 
 // ─── Conversas ────────────────────────────────────────────────────────────────
 
-export const conversations = pgTable("finance_conversations", {
+export const conversations = pgTable("ff_finance_conversations", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull().default("Nova conversa"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -106,8 +126,9 @@ export const conversations = pgTable("finance_conversations", {
 // NOTE: conversations table is renamed to finance_conversations to avoid
 // conflict with the Supabase SaaS `conversations` table (client support convos)
 
-export const chatMessages = pgTable("chat_messages", {
+export const chatMessages = pgTable("ff_chat_messages", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   conversationId: uuid("conversation_id"),
   role: chatRoleEnum("role").notNull(),
   content: text("content").notNull(),
@@ -117,8 +138,9 @@ export const chatMessages = pgTable("chat_messages", {
 
 // ─── Alertas ─────────────────────────────────────────────────────────────────
 
-export const alerts = pgTable("alerts", {
+export const alerts = pgTable("ff_alerts", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   type: alertTypeEnum("type").notNull(),
   category: text("category").notNull(),
   message: text("message").notNull(),
@@ -128,8 +150,9 @@ export const alerts = pgTable("alerts", {
 
 // ─── Perfil do Usuário ───────────────────────────────────────────────────────
 
-export const userProfile = pgTable("user_profile", {
+export const userProfile = pgTable("ff_user_profile", {
   id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   nome: text("nome").notNull(),
   rendaMensal: numeric("renda_mensal", { precision: 10, scale: 2 }),
   dividaMensal: numeric("divida_mensal", { precision: 10, scale: 2 }),
@@ -138,33 +161,44 @@ export const userProfile = pgTable("user_profile", {
   temReserva: text("tem_reserva"),
   categoriasAltas: text("categorias_altas").array(),
   onboardingCompleto: boolean("onboarding_completo").notNull().default(false),
-  aiNotes: text("ai_notes"), // Observações que a IA anota sobre o usuário
+  aiNotes: text("ai_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // ─── Mapeamento de Favorecidos (cache da IA) ──────────────────────────────────
+// Per-user: each user builds their own payee mappings
 
-export const payeeMappings = pgTable("payee_mappings", {
-  id: serial("id").primaryKey(),
-  beneficiaryNormalized: text("beneficiary_normalized").unique().notNull(),
-  beneficiaryDisplay: text("beneficiary_display"),
-  category: text("category").notNull(),
-  subcategory: text("subcategory"),
-  confidence: text("confidence").notNull().default("ai"), // 'ai' | 'manual'
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+export const payeeMappings = pgTable(
+  "ff_payee_mappings",
+  {
+    id: serial("id").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    beneficiaryNormalized: text("beneficiary_normalized").notNull(),
+    beneficiaryDisplay: text("beneficiary_display"),
+    category: text("category").notNull(),
+    subcategory: text("subcategory"),
+    confidence: text("confidence").notNull().default("ai"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_payee_per_user").on(table.userId, table.beneficiaryNormalized),
+  ]
+);
 
 // ─── Notas de Contexto para IA ───────────────────────────────────────────────
 
-export const payeeNotes = pgTable("payee_notes", {
+export const payeeNotes = pgTable("ff_payee_notes", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   note: text("note").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // ─── TypeScript Types ─────────────────────────────────────────────────────────
 
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
 export type CategoryRule = typeof categoryRules.$inferSelect;

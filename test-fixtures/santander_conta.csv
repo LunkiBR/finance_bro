@@ -1,0 +1,10 @@
+Banco Santander Brasil S.A.
+Agência: 0001 Conta: 12345-6
+Período: 01/02/2026 a 28/02/2026
+Extrato de Conta Corrente
+
+Data;Lançamento;Descrição;Valor;Saldo
+10/02/2026;PIX;João Silva;-150,00;1.200,00
+11/02/2026;TED;Empresa ABC;2.500,00;3.700,00
+12/02/2026;DÉBITO;Supermercado;-89,90;3.610,10
+13/02/2026;PIX;Farmácia;-45,00;3.565,10

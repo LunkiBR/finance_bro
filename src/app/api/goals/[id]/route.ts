@@ -1,28 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goals } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function PATCH(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const { id } = await params;
         const body = await req.json();
 
         if (body.addAmount) {
-            // Increment current amount
             await db
                 .update(goals)
                 .set({
                     currentAmount: sql`${goals.currentAmount}::numeric + ${body.addAmount}::numeric`,
                 })
-                .where(eq(goals.id, id));
+                .where(and(eq(goals.id, id), eq(goals.userId, userId)));
         }
 
         if (body.status) {
-            await db.update(goals).set({ status: body.status }).where(eq(goals.id, id));
+            await db
+                .update(goals)
+                .set({ status: body.status })
+                .where(and(eq(goals.id, id), eq(goals.userId, userId)));
         }
 
         return NextResponse.json({ success: true });
@@ -36,9 +43,13 @@ export async function DELETE(
     _req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const { id } = await params;
-        await db.delete(goals).where(eq(goals.id, id));
+        await db.delete(goals).where(and(eq(goals.id, id), eq(goals.userId, userId)));
         return NextResponse.json({ success: true });
     } catch (err) {
         console.error("Goal delete error:", err);

@@ -1,30 +1,38 @@
 import { NextRequest } from "next/server";
 import { db } from "@/db";
 import { conversations, chatMessages } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
 
-// GET /api/conversations — list all conversations (most recent first)
 export async function GET() {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const convs = await db
             .select()
             .from(conversations)
+            .where(eq(conversations.userId, userId))
             .orderBy(desc(conversations.updatedAt))
             .limit(50);
 
         return Response.json(convs);
     } catch (err) {
         console.error("Conversations GET error:", err);
-        return Response.json([], { status: 200 }); // never break the UI
+        return Response.json([], { status: 200 });
     }
 }
 
-// POST /api/conversations — create a new conversation
 export async function POST() {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const [conv] = await db
             .insert(conversations)
-            .values({ title: "Nova conversa" })
+            .values({ userId, title: "Nova conversa" })
             .returning();
 
         return Response.json(conv, { status: 201 });
@@ -34,16 +42,17 @@ export async function POST() {
     }
 }
 
-// GET /api/conversations/[id]/messages is handled in the nested route
-// But we'll also support: GET /api/conversations?id=xxx to return messages
 export async function PUT(req: NextRequest) {
-    // PATCH: update title of a conversation
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const { id, title } = await req.json() as { id: string; title: string };
         const [updated] = await db
             .update(conversations)
             .set({ title, updatedAt: new Date() })
-            .where(eq(conversations.id, id))
+            .where(and(eq(conversations.id, id), eq(conversations.userId, userId)))
             .returning();
         return Response.json(updated);
     } catch (err) {

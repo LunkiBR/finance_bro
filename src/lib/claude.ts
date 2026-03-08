@@ -10,7 +10,7 @@ export const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
 // ─── Context Snapshot ─────────────────────────────────────────────────────────
 
-export async function buildContextSnapshot(): Promise<string> {
+export async function buildContextSnapshot(userId: string): Promise<string> {
   try {
     // Current month in the app format (e.g. "mar/26")
     const now = new Date();
@@ -27,21 +27,22 @@ export async function buildContextSnapshot(): Promise<string> {
         count: sql<number>`COUNT(*)`,
       })
         .from(transactions)
+        .where(eq(transactions.userId, userId))
         .groupBy(transactions.month, transactions.type)
         .orderBy(desc(transactions.month))
         .limit(8),
 
       // Budget status current month
-      db.select().from(budgets).where(eq(budgets.month, currentMonth)),
+      db.select().from(budgets).where(and(eq(budgets.userId, userId), eq(budgets.month, currentMonth))),
 
       // Active goals
-      db.select().from(goals).where(eq(goals.status, "active")),
+      db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.status, "active"))),
 
       // Active (non-dismissed) alerts
-      db.select().from(alerts).where(sql`${alerts.dismissedAt} IS NULL`).limit(5),
+      db.select().from(alerts).where(and(eq(alerts.userId, userId), sql`${alerts.dismissedAt} IS NULL`)).limit(5),
 
       // User profile
-      db.select().from(userProfile).limit(1),
+      db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1),
     ]);
 
     // Build monthly summary structure
@@ -420,7 +421,8 @@ export const financeTools: FunctionDeclaration[] = [
 
 export async function executeTool(
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  userId: string
 ): Promise<{ result: unknown; chartSpec?: ChartSpec }> {
   switch (toolName) {
 
@@ -437,7 +439,7 @@ export async function executeTool(
           total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
           count: sql<number>`COUNT(*)`,
         }).from(transactions)
-          .where(and(month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined))
+          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined))
           .groupBy(transactions.category, transactions.type)
           .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`));
         return { result: rows };
@@ -449,7 +451,7 @@ export async function executeTool(
           total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
           count: sql<number>`COUNT(*)`,
         }).from(transactions)
-          .where(and(month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
+          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
           .groupBy(transactions.beneficiary, transactions.category)
           .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`))
           .limit(limit);
@@ -462,13 +464,14 @@ export async function executeTool(
           total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
           count: sql<number>`COUNT(*)`,
         }).from(transactions)
-          .where(and(type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
+          .where(and(eq(transactions.userId, userId), type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
           .groupBy(transactions.month, transactions.type)
           .orderBy(transactions.month);
         return { result: rows };
       }
       const rows = await db.select().from(transactions)
         .where(and(
+          eq(transactions.userId, userId),
           month ? eq(transactions.month, month) : undefined,
           category ? eq(transactions.category, category) : undefined,
           subcategory ? eq(transactions.subcategory, subcategory) : undefined,
@@ -488,7 +491,7 @@ export async function executeTool(
         total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
         count: sql<number>`COUNT(*)`,
       }).from(transactions)
-        .where(month ? eq(transactions.month, month) : undefined)
+        .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined))
         .groupBy(transactions.month, transactions.type)
         .orderBy(transactions.month);
 
@@ -509,7 +512,7 @@ export async function executeTool(
     case "get_budget_status": {
       const { month, category } = input as { month?: string; category?: string };
       const rows = await db.select().from(budgets)
-        .where(and(month ? eq(budgets.month, month) : undefined, category ? eq(budgets.category, category) : undefined));
+        .where(and(eq(budgets.userId, userId), month ? eq(budgets.month, month) : undefined, category ? eq(budgets.category, category) : undefined));
       const withPct = rows.map((b) => ({
         ...b,
         pctUsed: b.limitAmount ? Math.round((Number(b.spentAmount) / Number(b.limitAmount)) * 100) : 0,
@@ -525,14 +528,14 @@ export async function executeTool(
       const { category, month, limitAmount } = input as { category: string; month: string; limitAmount: number };
       // Check if budget exists for this category+month
       const existing = await db.select().from(budgets)
-        .where(and(eq(budgets.category, category), eq(budgets.month, month))).limit(1);
+        .where(and(eq(budgets.userId, userId), eq(budgets.category, category), eq(budgets.month, month))).limit(1);
       if (existing.length > 0) {
         await db.update(budgets)
           .set({ limitAmount: String(limitAmount) })
-          .where(and(eq(budgets.category, category), eq(budgets.month, month)));
+          .where(and(eq(budgets.userId, userId), eq(budgets.category, category), eq(budgets.month, month)));
         return { result: { action: "updated", category, month, limitAmount, message: `Orçamento de "${category}" para ${month} atualizado para R$ ${limitAmount.toFixed(2)}.` } };
       } else {
-        await db.insert(budgets).values({ category, month, limitAmount: String(limitAmount) });
+        await db.insert(budgets).values({ userId, category, month, limitAmount: String(limitAmount) });
         return { result: { action: "created", category, month, limitAmount, message: `Orçamento de "${category}" para ${month} criado: R$ ${limitAmount.toFixed(2)}.` } };
       }
     }
@@ -540,7 +543,7 @@ export async function executeTool(
     // ── get_goals ──
     case "get_goals": {
       const { status } = input as { status?: "active" | "completed" | "paused" };
-      const rows = await db.select().from(goals).where(status ? eq(goals.status, status) : undefined);
+      const rows = await db.select().from(goals).where(and(eq(goals.userId, userId), status ? eq(goals.status, status) : undefined));
       const withPct = rows.map((g) => ({
         ...g,
         pctComplete: g.targetAmount ? Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100) : 0,
@@ -553,6 +556,7 @@ export async function executeTool(
     case "create_goal": {
       const { name, targetAmount, deadline } = input as { name: string; targetAmount: number; deadline?: string };
       const [created] = await db.insert(goals).values({
+        userId,
         name,
         targetAmount: String(targetAmount),
         deadline: deadline ?? null,
@@ -565,7 +569,7 @@ export async function executeTool(
     case "update_goal_progress": {
       const { goalName, currentAmount } = input as { goalName: string; currentAmount: number };
       // Find goal by partial name match
-      const all = await db.select().from(goals);
+      const all = await db.select().from(goals).where(eq(goals.userId, userId));
       const match = all.find((g) => g.name.toLowerCase().includes(goalName.toLowerCase()));
       if (!match) return { result: `Nenhuma meta encontrada com o nome "${goalName}".` };
       const isComplete = currentAmount >= Number(match.targetAmount);
@@ -578,27 +582,27 @@ export async function executeTool(
 
     // ── get_alerts ──
     case "get_alerts": {
-      const rows = await db.select().from(alerts).where(sql`${alerts.dismissedAt} IS NULL`);
+      const rows = await db.select().from(alerts).where(and(eq(alerts.userId, userId), sql`${alerts.dismissedAt} IS NULL`));
       return { result: rows.length > 0 ? rows : "Nenhum alerta ativo no momento." };
     }
 
     // ── dismiss_alert ──
     case "dismiss_alert": {
       const { alertId } = input as { alertId: string };
-      await db.update(alerts).set({ dismissedAt: new Date() }).where(eq(alerts.id, alertId));
+      await db.update(alerts).set({ dismissedAt: new Date() }).where(and(eq(alerts.id, alertId), eq(alerts.userId, userId)));
       return { result: { message: "Alerta dispensado com sucesso." } };
     }
 
     // ── get_user_profile ──
     case "get_user_profile": {
-      const profile = await db.select().from(userProfile).limit(1);
+      const profile = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
       return { result: profile[0] ?? "Nenhum perfil configurado." };
     }
 
     // ── update_user_profile ──
     case "update_user_profile": {
       const updates = input as { nome?: string; rendaMensal?: number; objetivoPrincipal?: string; aiNotes?: string };
-      const current = await db.select().from(userProfile).limit(1);
+      const current = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
       if (current.length === 0) return { result: "Nenhum perfil para atualizar." };
 
       // If ai_notes is provided, APPEND to existing (don't replace)
@@ -615,7 +619,7 @@ export async function executeTool(
         ...(updates.rendaMensal ? { rendaMensal: String(updates.rendaMensal) } : {}),
         ...(updates.objetivoPrincipal ? { objetivoPrincipal: updates.objetivoPrincipal } : {}),
         ...(updates.aiNotes ? { aiNotes: finalNotes } : {}),
-      }).where(eq(userProfile.id, current[0].id));
+      }).where(and(eq(userProfile.id, current[0].id), eq(userProfile.userId, userId)));
       return { result: { message: "Perfil atualizado.", aiNotes: finalNotes } };
     }
 
@@ -628,6 +632,7 @@ export async function executeTool(
         total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
       }).from(transactions)
         .where(and(
+          eq(transactions.userId, userId),
           eq(transactions.type, "despesa"),
           inArray(transactions.month, [month1, month2])
         ))
@@ -662,6 +667,7 @@ export async function executeTool(
         month: transactions.month,
       }).from(transactions)
         .where(and(
+          eq(transactions.userId, userId),
           eq(transactions.type, "despesa"),
           month ? eq(transactions.month, month) : undefined,
         ))
@@ -678,7 +684,7 @@ export async function executeTool(
         total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
         count: sql<number>`COUNT(*)`,
       }).from(transactions)
-        .where(and(eq(transactions.category, category), eq(transactions.type, "despesa")))
+        .where(and(eq(transactions.userId, userId), eq(transactions.category, category), eq(transactions.type, "despesa")))
         .groupBy(transactions.month)
         .orderBy(transactions.month);
 
@@ -746,14 +752,14 @@ export async function executeTool(
         return { result: { error: `Categoria "${category}" não é válida. Use list_categories para ver as opções.` } };
       }
 
-      const [tx] = await db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1);
+      const [tx] = await db.select().from(transactions).where(and(eq(transactions.id, transactionId), eq(transactions.userId, userId))).limit(1);
       if (!tx) return { result: { error: `Transação ${transactionId} não encontrada.` } };
 
       await db.update(transactions).set({
         category,
         subcategory: subcategory || null,
         categoryConfidence: "manual",
-      }).where(eq(transactions.id, transactionId));
+      }).where(and(eq(transactions.id, transactionId), eq(transactions.userId, userId)));
 
       // Save to payeeMappings for future imports
       if (pinPayee && tx.beneficiary) {
@@ -761,13 +767,14 @@ export async function executeTool(
         if (normalized) {
           try {
             await db.insert(payeeMappings).values({
+              userId,
               beneficiaryNormalized: normalized,
               beneficiaryDisplay: tx.beneficiary,
               category,
               subcategory: subcategory || null,
               confidence: "manual",
             }).onConflictDoUpdate({
-              target: payeeMappings.beneficiaryNormalized,
+              target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
               set: { category, subcategory: subcategory || null, confidence: "manual", updatedAt: new Date() },
             });
           } catch (e) {
@@ -824,13 +831,14 @@ Retorne APENAS um JSON válido (sem markdown):
           if (normalized) {
             try {
               await db.insert(payeeMappings).values({
+                userId,
                 beneficiaryNormalized: normalized,
                 beneficiaryDisplay: beneficiary,
                 category: parsed.suggested_category,
                 subcategory: parsed.suggested_subcategory || null,
                 confidence: "ai",
               }).onConflictDoUpdate({
-                target: payeeMappings.beneficiaryNormalized,
+                target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
                 set: {
                   category: parsed.suggested_category,
                   subcategory: parsed.suggested_subcategory || null,

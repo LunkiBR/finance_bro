@@ -2,17 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { budgets, transactions } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function GET(req: NextRequest) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     const month = req.nextUrl.searchParams.get("month") || "";
 
     try {
+        const conditions = [eq(budgets.userId, userId)];
+        if (month) conditions.push(eq(budgets.month, month));
+
         const rows = await db
             .select()
             .from(budgets)
-            .where(month ? eq(budgets.month, month) : undefined);
+            .where(and(...conditions));
 
-        // Enrich with actual spent from transactions
         const enriched = await Promise.all(
             rows.map(async (b) => {
                 const [spentResult] = await db
@@ -23,6 +30,7 @@ export async function GET(req: NextRequest) {
                     .from(transactions)
                     .where(
                         and(
+                            eq(transactions.userId, userId),
                             eq(transactions.category, b.category),
                             eq(transactions.month, b.month),
                             eq(transactions.type, "despesa")
@@ -49,10 +57,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+    const authResult = await requireAuth();
+    if (authResult instanceof Response) return authResult;
+    const { userId } = authResult;
+
     try {
         const body = await req.json();
 
         await db.insert(budgets).values({
+            userId,
             category: body.category,
             month: body.month,
             limitAmount: body.limitAmount,

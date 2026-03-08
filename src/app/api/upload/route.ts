@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { userProfile } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { requireAuth } from "@/lib/auth-guard";
+
 export async function POST(req: NextRequest) {
+  const authResult = await requireAuth();
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -23,18 +30,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Lê o CSV em memória (sem persistir no servidor)
-    const csvContent = await file.text();
+    // Detect encoding: try UTF-8 first, fallback to Windows-1252 (common in BR banks)
+    const buffer = await file.arrayBuffer();
+    const utf8Content = new TextDecoder("utf-8").decode(new Uint8Array(buffer));
+    const csvContent = utf8Content.includes("\uFFFD")
+      ? new TextDecoder("windows-1252").decode(new Uint8Array(buffer))
+      : utf8Content;
 
     if (!csvContent.trim()) {
       return NextResponse.json({ error: "Arquivo vazio." }, { status: 400 });
     }
 
-    // Fetch user info for personalization
-    const profileInfo = await db.select().from(userProfile).limit(1);
+    const profileInfo = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
     const userName = profileInfo[0]?.nome || "usuário";
 
-    // Envia ao n8n para processamento
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     if (!n8nUrl) {
       return NextResponse.json(
@@ -56,6 +65,7 @@ export async function POST(req: NextRequest) {
         csvContent,
         uploadedAt: new Date().toISOString(),
         userName,
+        userId,
       }),
     });
 

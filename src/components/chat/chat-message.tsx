@@ -6,13 +6,13 @@ import { InlineChart } from "@/components/charts/inline-chart";
 interface ChatMessageProps {
     role: "user" | "assistant";
     content: string;
-    chartSpec?: ChartSpec | null;
+    chartSpecs?: ChartSpec[];
     isStreaming?: boolean;
     retryable?: boolean;
     onRetry?: () => void;
 }
 
-export function ChatMessage({ role, content, chartSpec, isStreaming, retryable, onRetry }: ChatMessageProps) {
+export function ChatMessage({ role, content, chartSpecs, isStreaming, retryable, onRetry }: ChatMessageProps) {
     if (role === "user") {
         // ChatGPT user bubble: blue, right-aligned, ~12px radius, tighter padding
         return (
@@ -46,16 +46,17 @@ export function ChatMessage({ role, content, chartSpec, isStreaming, retryable, 
                     style={{ background: "var(--text-primary)", borderRadius: "1px" }}
                 />
             )}
-            {chartSpec && (
+            {chartSpecs && chartSpecs.length > 0 && chartSpecs.map((spec, i) => (
                 <div
+                    key={i}
                     className="mt-4 rounded-[10px] overflow-hidden border"
                     style={{ borderColor: "var(--border)" }}
                 >
                     <div className="p-4" style={{ background: "var(--bg-elevated)" }}>
-                        <InlineChart spec={chartSpec} />
+                        <InlineChart spec={spec} />
                     </div>
                 </div>
-            )}
+            ))}
             {/* Retry button for retryable errors */}
             {!isStreaming && retryable && onRetry && (
                 <button

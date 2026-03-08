@@ -65,7 +65,7 @@ export default function CopilotoPage() {
                                         key={msg.id}
                                         role={msg.role}
                                         content={msg.content}
-                                        chartSpec={msg.chartSpec}
+                                        chartSpecs={msg.chartSpecs}
                                         isStreaming={msg.isStreaming}
                                         retryable={msg.retryable}
                                         onRetry={msg.retryable ? retryLastMessage : undefined}

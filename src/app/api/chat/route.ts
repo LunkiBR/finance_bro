@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     // Envia o conversationId logo no início do stream
     (async () => {
       let fullResponse = "";
-      let chartSpec: ChartSpec | undefined;
+      const chartSpecs: ChartSpec[] = [];
 
       try {
         // Sinaliza o conversationId logo de início
@@ -181,7 +181,12 @@ export async function POST(req: NextRequest) {
                   userId
                 );
 
-                if (cs) chartSpec = cs;
+                if (cs) {
+                  chartSpecs.push(cs);
+                  await writer.write(
+                    encoder.encode(`data: ${JSON.stringify({ type: "chart", spec: cs })}\n\n`)
+                  );
+                }
 
                 // Gemini FunctionResponse.response maps to protobuf Struct which only
                 // accepts plain JSON objects (string-keyed). Wrap non-object results.
@@ -232,12 +237,6 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (chartSpec) {
-          await writer.write(
-            encoder.encode(`data: ${JSON.stringify({ type: "chart", spec: chartSpec })}\n\n`)
-          );
-        }
-
         // Salva resposta do assistente
         try {
           await db.insert(chatMessages).values({
@@ -245,7 +244,8 @@ export async function POST(req: NextRequest) {
             conversationId: convId,
             role: "assistant",
             content: fullResponse,
-            chartSpec: chartSpec ?? null,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            chartSpec: chartSpecs.length > 0 ? (chartSpecs as any) : null,
           });
 
           // Atualiza updated_at da conversa

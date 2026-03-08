@@ -7,7 +7,7 @@ export interface ChatStreamMessage {
     id: string;
     role: "user" | "assistant";
     content: string;
-    chartSpec?: ChartSpec | null;
+    chartSpecs?: ChartSpec[];
     isStreaming?: boolean;
     errorType?: string;
     retryable?: boolean;
@@ -33,7 +33,7 @@ export function useChatStream() {
                     id: m.id,
                     role: m.role as "user" | "assistant",
                     content: m.content,
-                    chartSpec: m.chart_spec || null,
+                    chartSpecs: (Array.isArray(m.chartSpec) ? m.chartSpec : m.chartSpec ? [m.chartSpec] : []),
                 }))
             );
         } catch {
@@ -59,6 +59,7 @@ export function useChatStream() {
             id: `assistant-${Date.now()}`,
             role: "assistant",
             content: "",
+            chartSpecs: [],
             isStreaming: true,
         };
 
@@ -120,7 +121,7 @@ export function useChatStream() {
                                 const updated = [...prev];
                                 const last = updated[updated.length - 1];
                                 if (last.role === "assistant") {
-                                    updated[updated.length - 1] = { ...last, chartSpec: data.spec };
+                                    updated[updated.length - 1] = { ...last, chartSpecs: [...(last.chartSpecs || []), data.spec] };
                                 }
                                 return updated;
                             });

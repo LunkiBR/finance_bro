@@ -129,19 +129,20 @@ export function Sidebar() {
                 className="px-3 py-3 space-y-[2px] border-t"
                 style={{ borderColor: "var(--border)" }}
             >
-                <button
-                    className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] w-full transition-colors"
-                    style={{ color: "var(--text-secondary)" }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "var(--bg-elevated)";
+                <Link
+                    href="/configuracoes"
+                    className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] transition-colors"
+                    style={{
+                        background: pathname.startsWith("/configuracoes") ? "var(--bg-elevated)" : "transparent",
+                        color: pathname.startsWith("/configuracoes") ? "var(--text-primary)" : "var(--text-secondary)",
+                        fontWeight: pathname.startsWith("/configuracoes") ? 500 : 400,
                     }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                    }}
+                    onMouseEnter={(e) => { if (!pathname.startsWith("/configuracoes")) e.currentTarget.style.background = "var(--bg-elevated)"; }}
+                    onMouseLeave={(e) => { if (!pathname.startsWith("/configuracoes")) e.currentTarget.style.background = "transparent"; }}
                 >
                     <Settings size={16} />
                     <span>Configurações</span>
-                </button>
+                </Link>
                 <button
                     onClick={() => signOut({ callbackUrl: "/login" })}
                     className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] w-full transition-colors cursor-pointer"

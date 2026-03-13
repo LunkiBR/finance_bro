@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions } from "@/db/schema";
-import { eq, and, sql, desc, ilike } from "drizzle-orm";
+import { eq, and, sql, desc, asc, ilike, gte, lte } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+
+const ALLOWED_SORT_COLS = ["date", "description", "beneficiary", "category", "amount"] as const;
+type SortCol = (typeof ALLOWED_SORT_COLS)[number];
 
 export async function GET(req: NextRequest) {
     const authResult = await requireAuth();
@@ -18,21 +21,43 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(params.get("limit") || "25");
     const offset = (page - 1) * limit;
 
+    const sortByRaw = params.get("sortBy") || "date";
+    const sortBy: SortCol = ALLOWED_SORT_COLS.includes(sortByRaw as SortCol) ? (sortByRaw as SortCol) : "date";
+    const sortDir = params.get("sortDir") === "asc" ? "asc" : "desc";
+
+    const minAmount = params.get("minAmount");
+    const maxAmount = params.get("maxAmount");
+    const startDate = params.get("startDate");
+    const endDate = params.get("endDate");
+
     try {
         const conditions = [eq(transactions.userId, userId)];
-        if (month) conditions.push(eq(transactions.month, month));
+        if (month && !startDate && !endDate) conditions.push(eq(transactions.month, month));
         if (category) conditions.push(eq(transactions.category, category));
         if (type) conditions.push(eq(transactions.type, type));
         if (search) conditions.push(ilike(transactions.description, `%${search}%`));
+        if (minAmount) conditions.push(gte(sql`${transactions.amount}::numeric`, Number(minAmount)));
+        if (maxAmount) conditions.push(lte(sql`${transactions.amount}::numeric`, Number(maxAmount)));
+        if (startDate) conditions.push(gte(transactions.date, startDate));
+        if (endDate) conditions.push(lte(transactions.date, endDate));
 
         const where = and(...conditions);
+
+        const sortColExpr = sortBy === "amount"
+            ? sql`${transactions.amount}::numeric`
+            : sortBy === "date" ? transactions.date
+            : sortBy === "description" ? transactions.description
+            : sortBy === "beneficiary" ? transactions.beneficiary
+            : transactions.category;
+
+        const orderExpr = sortDir === "asc" ? asc(sortColExpr) : desc(sortColExpr);
 
         const [rows, countResult, summaryResult] = await Promise.all([
             db
                 .select()
                 .from(transactions)
                 .where(where)
-                .orderBy(desc(transactions.date))
+                .orderBy(orderExpr)
                 .limit(limit)
                 .offset(offset),
             db

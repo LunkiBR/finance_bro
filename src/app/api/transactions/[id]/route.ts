@@ -29,8 +29,9 @@ export async function PATCH(
 
     const updates: Partial<{
       category: string;
-      subcategory: string;
+      subcategory: string | null;
       categoryConfidence: "high" | "low" | "manual";
+      beneficiary: string;
     }> = {};
 
     if (body.category) {
@@ -39,6 +40,9 @@ export async function PATCH(
     }
     if (body.subcategory !== undefined) {
       updates.subcategory = body.subcategory;
+    }
+    if (body.beneficiary !== undefined) {
+      updates.beneficiary = body.beneficiary;
     }
 
     await db
@@ -82,6 +86,29 @@ export async function PATCH(
     console.error("Transaction update error:", err);
     return NextResponse.json(
       { error: "Erro ao atualizar transação." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authResult = await requireAuth();
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  try {
+    const { id } = await params;
+    await db
+      .delete(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Transaction delete error:", err);
+    return NextResponse.json(
+      { error: "Erro ao excluir transação." },
       { status: 500 }
     );
   }

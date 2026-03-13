@@ -27,7 +27,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Móveis e Eletrodomésticos",
       "Serviços Domésticos",
     ],
-    color: { bg: "rgba(139, 92, 246, 0.12)", text: "#8B5CF6", dot: "#8B5CF6" },
+    color: { bg: "rgba(139, 92, 246, 0.14)", text: "#9B7EBD", dot: "#8B5CF6" },
     type: "despesa",
   },
 
@@ -43,7 +43,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Cafeteria",
       "Bar e Petisco",
     ],
-    color: { bg: "rgba(245, 158, 11, 0.12)", text: "#F59E0B", dot: "#F59E0B" },
+    color: { bg: "rgba(245, 158, 11, 0.14)", text: "#CC841A", dot: "#F59E0B" },
     type: "despesa",
   },
 
@@ -60,7 +60,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Seguro do Veículo",
       "Documentação Veicular",
     ],
-    color: { bg: "rgba(59, 130, 246, 0.12)", text: "#3B82F6", dot: "#3B82F6" },
+    color: { bg: "rgba(59, 130, 246, 0.14)", text: "#5B8FD4", dot: "#3B82F6" },
     type: "despesa",
   },
 
@@ -73,7 +73,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Serviços de Nuvem",
       "Serviços Bancários",
     ],
-    color: { bg: "rgba(100, 116, 139, 0.12)", text: "#64748B", dot: "#64748B" },
+    color: { bg: "rgba(100, 116, 139, 0.14)", text: "#7A8FA8", dot: "#64748B" },
     type: "despesa",
   },
 
@@ -87,7 +87,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Academia",
       "Bem-estar",
     ],
-    color: { bg: "rgba(229, 72, 77, 0.12)", text: "#E5484D", dot: "#E5484D" },
+    color: { bg: "rgba(229, 72, 77, 0.14)", text: "#C44248", dot: "#E5484D" },
     type: "despesa",
   },
 
@@ -99,7 +99,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Livros e Materiais",
       "Papelaria",
     ],
-    color: { bg: "rgba(6, 182, 212, 0.12)", text: "#06B6D4", dot: "#06B6D4" },
+    color: { bg: "rgba(6, 182, 212, 0.14)", text: "#1A9EB8", dot: "#06B6D4" },
     type: "despesa",
   },
 
@@ -112,7 +112,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Alimentação no Trabalho",
       "Despesas MEI / PJ",
     ],
-    color: { bg: "rgba(14, 165, 233, 0.12)", text: "#0EA5E9", dot: "#0EA5E9" },
+    color: { bg: "rgba(14, 165, 233, 0.14)", text: "#1A96CC", dot: "#0EA5E9" },
     type: "despesa",
   },
 
@@ -126,7 +126,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Esporte",
       "Eventos e Festas",
     ],
-    color: { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
+    color: { bg: "rgba(0, 166, 126, 0.14)", text: "#1A9472", dot: "#00A67E" },
     type: "despesa",
   },
 
@@ -140,7 +140,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "E-commerce Geral",
       "Presentes",
     ],
-    color: { bg: "rgba(236, 72, 153, 0.12)", text: "#EC4899", dot: "#EC4899" },
+    color: { bg: "rgba(236, 72, 153, 0.14)", text: "#C43E84", dot: "#EC4899" },
     type: "despesa",
   },
 
@@ -151,7 +151,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Pensão / Manutenção",
       "Ajuda Financeira a Família",
     ],
-    color: { bg: "rgba(249, 115, 22, 0.12)", text: "#F97316", dot: "#F97316" },
+    color: { bg: "rgba(249, 115, 22, 0.14)", text: "#CC6420", dot: "#F97316" },
     type: "despesa",
   },
 
@@ -166,7 +166,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Apps de Produtividade",
       "Jogos por Assinatura",
     ],
-    color: { bg: "rgba(99, 102, 241, 0.12)", text: "#6366F1", dot: "#6366F1" },
+    color: { bg: "rgba(99, 102, 241, 0.14)", text: "#7B7ED0", dot: "#6366F1" },
     type: "despesa",
   },
 
@@ -179,7 +179,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Imposto de Renda",
       "Outros Impostos",
     ],
-    color: { bg: "rgba(120, 113, 108, 0.12)", text: "#78716C", dot: "#78716C" },
+    color: { bg: "rgba(120, 113, 108, 0.14)", text: "#8A8680", dot: "#78716C" },
     type: "despesa",
   },
 
@@ -193,7 +193,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Outras Dívidas",
       "Juros sobre Dívidas",
     ],
-    color: { bg: "rgba(220, 38, 38, 0.12)", text: "#DC2626", dot: "#DC2626" },
+    color: { bg: "rgba(220, 38, 38, 0.14)", text: "#B82020", dot: "#DC2626" },
     type: "despesa",
   },
 
@@ -207,7 +207,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Outros Investimentos",
       "Corretagem e Taxas",
     ],
-    color: { bg: "rgba(34, 197, 94, 0.12)", text: "#22C55E", dot: "#22C55E" },
+    color: { bg: "rgba(34, 197, 94, 0.14)", text: "#1CAD52", dot: "#22C55E" },
     type: "ambos",
   },
 
@@ -218,7 +218,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Poupança Curto Prazo",
       "Cofrinhos / Caixinhas",
     ],
-    color: { bg: "rgba(20, 184, 166, 0.12)", text: "#14B8A6", dot: "#14B8A6" },
+    color: { bg: "rgba(20, 184, 166, 0.14)", text: "#12A496", dot: "#14B8A6" },
     type: "despesa",
   },
 
@@ -231,7 +231,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Transferência para Terceiros",
       "Split de Contas",
     ],
-    color: { bg: "rgba(168, 85, 247, 0.12)", text: "#A855F7", dot: "#A855F7" },
+    color: { bg: "rgba(168, 85, 247, 0.14)", text: "#9248D8", dot: "#A855F7" },
     type: "ambos",
   },
 
@@ -246,7 +246,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Estorno",
       "Transferência Própria",
     ],
-    color: { bg: "rgba(0, 166, 126, 0.12)", text: "#00A67E", dot: "#00A67E" },
+    color: { bg: "rgba(0, 166, 126, 0.14)", text: "#1A9472", dot: "#00A67E" },
     type: "receita",
   },
 
@@ -257,7 +257,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Ajuste / Crédito",
       "Estorno em Fatura",
     ],
-    color: { bg: "rgba(129, 140, 248, 0.12)", text: "#818CF8", dot: "#818CF8" },
+    color: { bg: "rgba(129, 140, 248, 0.14)", text: "#7B82D8", dot: "#818CF8" },
     type: "ambos",
   },
 
@@ -268,7 +268,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
       "Serviços Diversos",
       "Outros",
     ],
-    color: { bg: "rgba(77, 82, 96, 0.12)", text: "#8A8F98", dot: "#4D5260" },
+    color: { bg: "rgba(77, 82, 96, 0.14)", text: "#8A8F98", dot: "#4D5260" },
     type: "ambos",
   },
 
@@ -277,7 +277,7 @@ export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
     subcategories: [
       "Dúvida",
     ],
-    color: { bg: "rgba(251, 191, 36, 0.12)", text: "#FBBF24", dot: "#FBBF24" },
+    color: { bg: "rgba(251, 191, 36, 0.14)", text: "#CC9C18", dot: "#FBBF24" },
     type: "ambos",
   },
 };

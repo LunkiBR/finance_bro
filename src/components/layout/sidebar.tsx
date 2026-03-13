@@ -16,6 +16,7 @@ import {
     Plus,
     Diamond,
     LogOut,
+    Zap,
 } from "lucide-react";
 
 const navItems = [
@@ -24,6 +25,7 @@ const navItems = [
     { href: "/transacoes", label: "Transações", icon: List },
     { href: "/orcamentos", label: "Orçamentos", icon: PieChart },
     { href: "/metas", label: "Metas", icon: Target },
+    { href: "/automacoes", label: "Automações", icon: Zap },
     { href: "/alertas", label: "Alertas", icon: Bell, badge: true },
     { href: "/importar", label: "Importar", icon: Upload },
 ];

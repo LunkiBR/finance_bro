@@ -41,6 +41,8 @@ export const categoryConfidenceEnum = pgEnum("category_confidence", [
   "manual",
 ]);
 
+export const matchTypeEnum = pgEnum("match_type", ["contains", "exact"]);
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const users = pgTable("ff_users", {
@@ -70,10 +72,12 @@ export const transactions = pgTable("ff_transactions", {
   month: text("month").notNull(),
   rawLine: text("raw_line"),
   categoryConfidence: categoryConfidenceEnum("category_confidence").default("high"),
+  ruleIdApplied: uuid("rule_id_applied"),
+  isManuallyEdited: boolean("is_manually_edited").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ─── Motor de categorização ───────────────────────────────────────────────────
+// ─── Motor de categorização (global) ──────────────────────────────────────────
 // category_rules is global (no user_id) — shared across all users
 
 export const categoryRules = pgTable("ff_category_rules", {
@@ -83,6 +87,20 @@ export const categoryRules = pgTable("ff_category_rules", {
   subcategory: text("subcategory"),
   type: transactionTypeEnum("type").notNull(),
   priority: integer("priority").notNull().default(0),
+});
+
+// ─── Regras de categorização do usuário ──────────────────────────────────────
+
+export const userCategoryRules = pgTable("ff_user_category_rules", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  matchType: matchTypeEnum("match_type").notNull(),
+  matchString: text("match_string").notNull(),
+  targetCategory: text("target_category").notNull(),
+  targetSubcategory: text("target_subcategory"),
+  priority: integer("priority").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // ─── Orçamentos ───────────────────────────────────────────────────────────────
@@ -212,3 +230,5 @@ export type NewUserProfile = typeof userProfile.$inferInsert;
 export type PayeeMapping = typeof payeeMappings.$inferSelect;
 export type NewPayeeMapping = typeof payeeMappings.$inferInsert;
 export type PayeeNote = typeof payeeNotes.$inferSelect;
+export type UserCategoryRule = typeof userCategoryRules.$inferSelect;
+export type NewUserCategoryRule = typeof userCategoryRules.$inferInsert;

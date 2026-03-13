@@ -5,6 +5,7 @@ import { MonthSelector } from "@/components/transactions/month-selector";
 import { CategoryBadge, CategoryPicker } from "@/components/transactions/category-badge";
 import { ALL_CATEGORIES } from "@/lib/category-colors";
 import { getCurrentMonth, formatBRL } from "@/lib/utils";
+import { RuleToast, type RuleToastData } from "@/components/transactions/rule-toast";
 import { Search, SlidersHorizontal, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
 interface Transaction {
@@ -48,6 +49,9 @@ export default function TransacoesPage() {
     // Inline editing
     const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
     const [editingBeneficiary, setEditingBeneficiary] = useState<{ id: string; value: string } | null>(null);
+
+    // Rule toast
+    const [ruleToast, setRuleToast] = useState<RuleToastData | null>(null);
 
     // Advanced filters
     const [showFilters, setShowFilters] = useState(false);
@@ -134,15 +138,62 @@ export default function TransacoesPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ category: newCategory, subcategory: newSubcategory || null, pinPayee: true }),
         });
+
+        const tx = data?.transactions.find((t) => t.id === txId);
         if (data) {
             setData({
                 ...data,
-                transactions: data.transactions.map((tx) =>
-                    tx.id === txId ? { ...tx, category: newCategory, subcategory: newSubcategory || null, categoryConfidence: "manual" as const } : tx
+                transactions: data.transactions.map((t) =>
+                    t.id === txId ? { ...t, category: newCategory, subcategory: newSubcategory || null, categoryConfidence: "manual" as const } : t
                 ),
             });
         }
         setEditingCategoryId(null);
+
+        // Show rule creation toast
+        if (tx && tx.category !== newCategory) {
+            setRuleToast({
+                txId,
+                description: tx.description,
+                beneficiary: tx.beneficiary,
+                newCategory,
+                newSubcategory: newSubcategory || null,
+            });
+        }
+    }
+
+    // ─── Rule creation from toast ────────────────────────────────────────────────
+    async function createRuleFromToast(
+        matchType: "exact" | "contains",
+        matchString: string,
+        category: string,
+        subcategory?: string | null
+    ) {
+        try {
+            const res = await fetch("/api/rules", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    matchType,
+                    matchString,
+                    targetCategory: category,
+                    targetSubcategory: subcategory || null,
+                }),
+            });
+            const { rule } = await res.json();
+            if (rule?.id) {
+                // Apply rule to existing matching transactions
+                await fetch("/api/rules/apply", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ruleId: rule.id }),
+                });
+                setRefreshKey((k) => k + 1);
+            }
+        } catch (err) {
+            console.error("Failed to create rule:", err);
+        }
+        setRuleToast(null);
     }
 
     // ─── Beneficiary inline edit ─────────────────────────────────────────────────
@@ -697,6 +748,15 @@ export default function TransacoesPage() {
                     </div>
                 </>
             ) : null}
+
+            {/* Rule creation toast */}
+            {ruleToast && (
+                <RuleToast
+                    data={ruleToast}
+                    onCreateRule={createRuleFromToast}
+                    onDismiss={() => setRuleToast(null)}
+                />
+            )}
         </div>
     );
 }

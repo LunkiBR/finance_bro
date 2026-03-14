@@ -213,6 +213,16 @@ export const payeeNotes = pgTable("ff_payee_notes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ─── Sínteses da IA (geradas após importação) ────────────────────────────────
+
+export const aiSummaries = pgTable("ff_ai_summaries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  month: text("month").notNull(),
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+});
+
 // ─── TypeScript Types ─────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -232,3 +242,4 @@ export type NewPayeeMapping = typeof payeeMappings.$inferInsert;
 export type PayeeNote = typeof payeeNotes.$inferSelect;
 export type UserCategoryRule = typeof userCategoryRules.$inferSelect;
 export type NewUserCategoryRule = typeof userCategoryRules.$inferInsert;
+export type AiSummary = typeof aiSummaries.$inferSelect;

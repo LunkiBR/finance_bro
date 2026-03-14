@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, budgets, goals } from "@/db/schema";
+import { transactions, budgets, goals, aiSummaries } from "@/db/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { getCurrentMonth, getPrevMonth, formatBRL, monthToNum } from "@/lib/utils";
 import { requireAuth } from "@/lib/auth-guard";
+
+const PT_MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+function parseMonth(month: string): { year: number; monthIdx: number } {
+    const [m, y] = month.split('/');
+    return { year: 2000 + parseInt(y), monthIdx: PT_MONTHS.indexOf(m) };
+}
+
+function daysInMonth(year: number, monthIdx: number): number {
+    return new Date(year, monthIdx + 1, 0).getDate();
+}
 
 export async function GET(req: NextRequest) {
     const authResult = await requireAuth();
@@ -11,6 +22,7 @@ export async function GET(req: NextRequest) {
     const { userId } = authResult;
 
     const month = req.nextUrl.searchParams.get("month") || getCurrentMonth();
+    const currentMonth = getCurrentMonth();
     const prevMonth = getPrevMonth(month);
     const month2 = getPrevMonth(prevMonth);
     const month3 = getPrevMonth(month2);
@@ -113,6 +125,94 @@ export async function GET(req: NextRequest) {
             .orderBy(desc(transactions.date))
             .limit(5);
 
+        // ── Libre para Gastar (freeToSpend) ───────────────────────────────────
+        // Step 1: recurring beneficiaries — those that appeared in last 3 months
+        const recurringQuery = await db
+            .select({
+                beneficiary: transactions.beneficiary,
+                avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
+                monthCount: sql<number>`COUNT(DISTINCT ${transactions.month})`,
+            })
+            .from(transactions)
+            .where(and(
+                eq(transactions.userId, userId),
+                inArray(transactions.month, [prevMonth, month2, month3]),
+                eq(transactions.type, "despesa")
+            ))
+            .groupBy(transactions.beneficiary)
+            .having(sql`COUNT(DISTINCT ${transactions.month}) >= 2`); // ≥2 of 3 months = recurring
+
+        const recurringBeneficiaries = new Set(recurringQuery.map(r => r.beneficiary));
+        const estimatedRecurring = recurringQuery.reduce((s, r) => s + Number(r.avgAmount), 0);
+
+        // Step 2: goal monthly contributions
+        const now = new Date();
+        const goalContributions = goalsData
+            .filter(g => g.status === "active" && g.deadline)
+            .reduce((sum, g) => {
+                const deadline = new Date(g.deadline!);
+                const monthsLeft = Math.max(1,
+                    (deadline.getFullYear() - now.getFullYear()) * 12 +
+                    (deadline.getMonth() - now.getMonth())
+                );
+                const needed = Math.max(0, g.target - g.current) / monthsLeft;
+                return sum + needed;
+            }, 0);
+
+        // Step 3: variable spending in current month (non-recurring beneficiaries)
+        const currentMonthExpenses = await db
+            .select({
+                beneficiary: transactions.beneficiary,
+                total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
+            })
+            .from(transactions)
+            .where(and(
+                eq(transactions.userId, userId),
+                eq(transactions.month, month),
+                eq(transactions.type, "despesa")
+            ))
+            .groupBy(transactions.beneficiary);
+
+        const variableSpent = currentMonthExpenses
+            .filter(r => !recurringBeneficiaries.has(r.beneficiary))
+            .reduce((s, r) => s + Number(r.total), 0);
+
+        const freeToSpend = Math.round((receitas - estimatedRecurring - goalContributions - variableSpent) * 100) / 100;
+
+        // ── Burn Rate ─────────────────────────────────────────────────────────
+        const { year: mYear, monthIdx: mMonthIdx } = parseMonth(month);
+        const totalDays = daysInMonth(mYear, mMonthIdx);
+        let daysElapsed: number;
+
+        if (month === currentMonth) {
+            daysElapsed = Math.max(1, new Date().getDate());
+        } else {
+            // Past month — use full month
+            daysElapsed = totalDays;
+        }
+
+        const dailyRate = Math.round((despesas / daysElapsed) * 100) / 100;
+        const projectedMonthTotal = Math.round(dailyRate * totalDays * 100) / 100;
+        let projectedRunOutDay: number | null = null;
+        if (receitas > 0 && dailyRate > 0) {
+            const day = Math.floor(receitas / dailyRate);
+            projectedRunOutDay = day <= totalDays ? day : null;
+        }
+
+        // ── AI Summary ────────────────────────────────────────────────────────
+        let aiSummaryContent: string | null = null;
+        try {
+            const [summaryRow] = await db
+                .select({ content: aiSummaries.content })
+                .from(aiSummaries)
+                .where(eq(aiSummaries.userId, userId))
+                .orderBy(desc(aiSummaries.generatedAt))
+                .limit(1);
+            aiSummaryContent = summaryRow?.content ?? null;
+        } catch {
+            // Not critical — dashboard works without it
+        }
+
         // ── Insights ──────────────────────────────────────────────────────────
 
         // Insight 1: top spending category vs 3-month average
@@ -157,7 +257,7 @@ export async function GET(req: NextRequest) {
                     insight1 = {
                         icon: "✓",
                         title: `${topCat.category} sob controle`,
-                        description: `Você gastou ${Math.abs(pctDiff)}% a menos em ${topCat.category} vs. média histórica. Ótimo!`,
+                        description: `Você gastou ${Math.abs(pctDiff)}% a menos em ${topCat.category} vs. média histórica.`,
                         linkText: "Ver transações",
                         linkHref: "/transacoes",
                     };
@@ -253,6 +353,11 @@ export async function GET(req: NextRequest) {
             };
         }
 
+        // ── Nearest active goal for KPI card ──────────────────────────────────
+        const nearestActiveGoal = goalsData
+            .filter(g => g.status === "active")
+            .sort((a, b) => b.pct - a.pct)[0] ?? null;
+
         return NextResponse.json({
             summary: { receitas, despesas, saldo, txCount },
             prevSummary: { receitas: prevReceitas, despesas: prevDespesas, saldo: prevSaldo },
@@ -262,6 +367,10 @@ export async function GET(req: NextRequest) {
             goals: goalsData,
             recentTransactions: recentTx,
             insights: [insight1, insight2, insight3],
+            freeToSpend: { freeToSpend, estimatedRecurring: Math.round(estimatedRecurring * 100) / 100, goalContributions: Math.round(goalContributions * 100) / 100, variableSpent: Math.round(variableSpent * 100) / 100 },
+            burnRate: { dailyRate, projectedMonthTotal, daysElapsed, daysInMonth: totalDays, projectedRunOutDay },
+            aiSummary: aiSummaryContent,
+            nearestGoal: nearestActiveGoal,
         });
     } catch (err) {
         console.error("Dashboard summary error:", err);

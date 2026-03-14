@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { MonthSelector } from "@/components/transactions/month-selector";
 import { getCategoryColor, EXPENSE_CATEGORIES } from "@/lib/category-colors";
 import { getCurrentMonth } from "@/lib/utils";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Trash2 } from "lucide-react";
 
 interface BudgetData {
     id: string;
@@ -30,6 +30,11 @@ export default function OrcamentosPage() {
             .then((d) => { setBudgets(d); setLoading(false); })
             .catch(() => setLoading(false));
     }, [month]);
+
+    async function deleteBudget(id: string) {
+        await fetch(`/api/budgets?id=${id}`, { method: "DELETE" });
+        setBudgets((prev) => prev.filter((b) => b.id !== id));
+    }
 
     async function createBudget() {
         if (!form.limitAmount) return;
@@ -84,9 +89,19 @@ export default function OrcamentosPage() {
                                     <span className="text-[13px]" style={{ color: "var(--text-primary)", fontWeight: 500 }}>
                                         {b.category}
                                     </span>
-                                    <span className="text-caption" style={{ color }}>
-                                        {b.pct >= 100 ? "⚠" : "✓"} {b.pct}%
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-caption" style={{ color }}>
+                                            {b.pct >= 100 ? "⚠" : "✓"} {b.pct}%
+                                        </span>
+                                        <button
+                                            onClick={() => deleteBudget(b.id)}
+                                            title="Remover orçamento"
+                                            className="opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
+                                            style={{ color: "var(--accent-red)" }}
+                                        >
+                                            <Trash2 size={13} />
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="h-[8px] rounded-full mb-3" style={{ background: "var(--bg-elevated)" }}>
                                     <div

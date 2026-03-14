@@ -146,7 +146,7 @@ export function Sidebar() {
                     <span>Configurações</span>
                 </Link>
                 <button
-                    onClick={() => signOut({ callbackUrl: "/login" })}
+                    onClick={() => signOut({ callbackUrl: `${window.location.origin}/login` })}
                     className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] w-full transition-colors cursor-pointer"
                     style={{ color: "var(--text-muted)" }}
                     onMouseEnter={(e) => {

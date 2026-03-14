@@ -7,46 +7,56 @@ interface RadarCardProps {
     linkHref: string;
 }
 
-// Determine semantic color from icon
-function iconColor(icon: string): string {
-    if (icon === "⚠" || icon === "⚡") return "var(--accent-amber)";
-    if (icon === "✓" || icon === "🏆") return "var(--accent-green)";
-    if (icon === "🎯" || icon === "📊") return "var(--accent-blue)";
+function accentColor(icon: string): string {
+    if (icon === "⚠" || icon === "⚡") return "#F59E0B";
+    if (icon === "✓" || icon === "🏆") return "#00A67E";
+    if (icon === "🎯" || icon === "📊") return "#3B82F6";
     return "var(--text-muted)";
 }
 
-function borderColor(icon: string): string {
-    if (icon === "⚠" || icon === "⚡") return "rgba(245,158,11,0.5)";
-    if (icon === "✓" || icon === "🏆") return "rgba(0,166,126,0.5)";
-    if (icon === "🎯" || icon === "📊") return "rgba(59,130,246,0.5)";
-    return "var(--border)";
+function accentBg(icon: string): string {
+    if (icon === "⚠" || icon === "⚡") return "rgba(245,158,11,0.08)";
+    if (icon === "✓" || icon === "🏆") return "rgba(0,166,126,0.08)";
+    if (icon === "🎯" || icon === "📊") return "rgba(59,130,246,0.08)";
+    return "transparent";
 }
 
 export function RadarCard({ icon, title, description, linkHref }: RadarCardProps) {
+    const dot = accentColor(icon);
+    const bg = accentBg(icon);
+
     return (
         <div
-            className="min-w-[280px] rounded-[6px] border p-4 flex flex-col justify-between shrink-0"
+            className="rounded-[6px] border p-4 flex flex-col gap-2"
             style={{
                 borderColor: "var(--border)",
-                borderLeft: `3px solid ${borderColor(icon)}`,
-                background: "var(--bg-surface)",
+                background: bg,
             }}
         >
-            <div>
-                <div className="flex items-center gap-2 mb-2">
-                    <span style={{ fontSize: 14, lineHeight: 1, color: iconColor(icon) }}>{icon}</span>
-                    <span className="text-[13px]" style={{ color: "var(--text-primary)", fontWeight: 500 }}>
-                        {title}
-                    </span>
-                </div>
-                <p className="text-caption leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    {description}
-                </p>
+            <div className="flex items-center gap-2">
+                <div
+                    className="w-[6px] h-[6px] rounded-full shrink-0"
+                    style={{ background: dot }}
+                />
+                <span
+                    className="text-[13px] leading-snug"
+                    style={{ color: "var(--text-primary)", fontWeight: 500 }}
+                >
+                    {title}
+                </span>
             </div>
+
+            <p
+                className="text-[12px] leading-[1.65]"
+                style={{ color: "var(--text-secondary)" }}
+            >
+                {description}
+            </p>
+
             <Link
                 href={linkHref}
-                className="text-caption mt-3 inline-flex items-center gap-1 transition-opacity hover:opacity-80"
-                style={{ color: "var(--accent-blue)" }}
+                className="text-[11px] mt-auto pt-1 transition-opacity hover:opacity-70"
+                style={{ color: dot }}
             >
                 Ver detalhes →
             </Link>

@@ -4,8 +4,8 @@ interface KpiCardProps {
     title: string;
     value: string;
     subtitle?: string;                     // second line below value
-    delta?: number;                        // raw absolute change (R$ diff or pp diff)
-    deltaFormat?: "currency" | "pp";       // "currency" → R$, "pp" → percentage points
+    delta?: number;                        // raw absolute change (R$ diff, pp diff, or %)
+    deltaFormat?: "currency" | "pp" | "pct"; // "currency" → R$, "pp" → pp, "pct" → %
     deltaLabel?: string;                   // e.g. "vs mês passado"
     icon?: React.ReactNode;
     positiveIsGood?: boolean;              // default true
@@ -14,7 +14,7 @@ interface KpiCardProps {
     barColor?: string;                     // bar color override
 }
 
-function formatDelta(delta: number, format: "currency" | "pp"): string {
+function formatDelta(delta: number, format: "currency" | "pp" | "pct"): string {
     const sign = delta > 0 ? "+" : "";
     if (format === "currency") {
         const abs = Math.abs(delta);
@@ -24,6 +24,7 @@ function formatDelta(delta: number, format: "currency" | "pp"): string {
         }).format(abs);
         return delta < 0 ? `-R$ ${formatted}` : `+R$ ${formatted}`;
     }
+    if (format === "pct") return `${sign}${Math.round(delta)}%`;
     return `${sign}${delta}pp`;
 }
 

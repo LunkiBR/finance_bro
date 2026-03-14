@@ -8,7 +8,7 @@ import { MonthSelector } from "@/components/transactions/month-selector";
 import { InlineChart } from "@/components/charts/inline-chart";
 import { getCurrentMonth, formatBRL } from "@/lib/utils";
 import Link from "next/link";
-import { Sparkles, Wallet, TrendingDown, Percent, Target } from "lucide-react";
+import { Sparkles, Scale, ArrowDownCircle, ArrowUpCircle, Target, Percent } from "lucide-react";
 
 interface Insight {
     icon: string;
@@ -61,19 +61,18 @@ export default function DashboardPage() {
     const taxaPoupanca = data && data.summary.receitas > 0
         ? Math.round(((data.summary.receitas - data.summary.despesas) / data.summary.receitas) * 100)
         : 0;
-    const prevTaxaPoupanca = data && data.prevSummary.receitas > 0
-        ? Math.round(((data.prevSummary.receitas - data.prevSummary.despesas) / data.prevSummary.receitas) * 100)
-        : 0;
 
+    const receitasPctDelta = data && data.prevSummary.receitas > 0
+        ? Math.round(((data.summary.receitas - data.prevSummary.receitas) / data.prevSummary.receitas) * 100)
+        : undefined;
+    const despesasPctDelta = data && data.prevSummary.despesas > 0
+        ? Math.round(((data.summary.despesas - data.prevSummary.despesas) / data.prevSummary.despesas) * 100)
+        : undefined;
     const saldoDelta = data ? Math.round((data.summary.saldo - data.prevSummary.saldo) * 100) / 100 : undefined;
-    const despesasDelta = data ? Math.round((data.summary.despesas - data.prevSummary.despesas) * 100) / 100 : undefined;
-    const taxaDelta = data ? taxaPoupanca - prevTaxaPoupanca : undefined;
-
-    const freeToSpend = data?.freeToSpend?.freeToSpend ?? 0;
-    const isOverspent = freeToSpend < 0;
 
     const burnRate = data?.burnRate;
     const areaWarning = data ? data.summary.despesas > data.summary.receitas : false;
+    const isNegativeSaldo = data ? data.summary.saldo < 0 : false;
 
     return (
         <div>
@@ -123,53 +122,52 @@ export default function DashboardPage() {
 
                     {/* ── Seção 2: KPI Cards ──────────────────────────────────────── */}
                     <div className="grid grid-cols-4 gap-4 mb-6">
-                        {/* Card 1: Livre para Gastar */}
+                        {/* Card 1: Saldo do Mês */}
                         <KpiCard
-                            title="Livre para Gastar"
-                            value={isOverspent ? "Estourado" : `R$ ${formatBRL(freeToSpend)}`}
-                            subtitle={
-                                isOverspent
-                                    ? `R$ ${formatBRL(Math.abs(freeToSpend))} acima do disponível`
-                                    : `R$ ${formatBRL(data.freeToSpend.estimatedRecurring)} recorrente · R$ ${formatBRL(data.freeToSpend.variableSpent)} variável`
+                            title="Saldo do Mês"
+                            value={
+                                isNegativeSaldo
+                                    ? `-R$ ${formatBRL(Math.abs(data.summary.saldo))}`
+                                    : `R$ ${formatBRL(data.summary.saldo)}`
                             }
-                            icon={<Wallet size={16} />}
-                            warning={isOverspent}
-                        />
-
-                        {/* Card 2: Ritmo de Gasto */}
-                        <KpiCard
-                            title="Ritmo de Gasto"
-                            value={`R$ ${formatBRL(burnRate?.projectedMonthTotal ?? data.summary.despesas)}`}
-                            subtitle={
-                                burnRate?.projectedRunOutDay
-                                    ? `Saldo acaba ~dia ${burnRate.projectedRunOutDay}`
-                                    : `R$ ${formatBRL(burnRate?.dailyRate ?? 0)}/dia · ${burnRate?.daysElapsed ?? 0} dias analisados`
-                            }
-                            icon={<TrendingDown size={16} />}
-                            delta={despesasDelta}
+                            subtitle={`${data.summary.txCount} transações no mês`}
+                            delta={saldoDelta}
                             deltaFormat="currency"
                             deltaLabel="vs mês anterior"
+                            positiveIsGood={true}
+                            icon={<Scale size={16} />}
+                            warning={isNegativeSaldo}
+                        />
+
+                        {/* Card 2: Receitas do Mês — A Âncora Positiva */}
+                        <KpiCard
+                            title="Receitas do Mês"
+                            value={`R$ ${formatBRL(data.summary.receitas)}`}
+                            delta={receitasPctDelta}
+                            deltaFormat="pct"
+                            deltaLabel="vs mês anterior"
+                            positiveIsGood={true}
+                            icon={<ArrowDownCircle size={16} />}
+                        />
+
+                        {/* Card 3: Despesas do Mês — A Âncora Negativa + Predição */}
+                        <KpiCard
+                            title="Despesas do Mês"
+                            value={`R$ ${formatBRL(data.summary.despesas)}`}
+                            subtitle={
+                                burnRate?.projectedRunOutDay
+                                    ? `Neste ritmo, você estoura dia ${burnRate.projectedRunOutDay}`
+                                    : `R$ ${formatBRL(burnRate?.dailyRate ?? 0)}/dia · ${burnRate?.daysElapsed ?? 0} dias`
+                            }
+                            delta={despesasPctDelta}
+                            deltaFormat="pct"
+                            deltaLabel="vs mês anterior"
                             positiveIsGood={false}
+                            icon={<ArrowUpCircle size={16} />}
                             warning={burnRate?.projectedRunOutDay != null}
                         />
 
-                        {/* Card 3: Poupança Real */}
-                        <KpiCard
-                            title="Poupança Real"
-                            value={`${taxaPoupanca}%`}
-                            subtitle={
-                                data.summary.saldo > 0
-                                    ? `R$ ${formatBRL(data.summary.saldo)} disponível`
-                                    : `Déficit de R$ ${formatBRL(Math.abs(data.summary.saldo))}`
-                            }
-                            delta={taxaDelta}
-                            deltaFormat="pp"
-                            deltaLabel="vs mês anterior"
-                            icon={<Percent size={16} />}
-                            warning={taxaPoupanca < 0}
-                        />
-
-                        {/* Card 4: Próxima Meta */}
+                        {/* Card 4: Objetivo — A Cenoura */}
                         {data.nearestGoal ? (
                             <KpiCard
                                 title="Próxima Meta"
@@ -181,16 +179,21 @@ export default function DashboardPage() {
                             />
                         ) : (
                             <KpiCard
-                                title="Próxima Meta"
-                                value="—"
-                                subtitle="Nenhuma meta ativa"
-                                icon={<Target size={16} />}
+                                title="Poupança Real"
+                                value={`${taxaPoupanca}%`}
+                                subtitle={
+                                    data.summary.saldo > 0
+                                        ? `R$ ${formatBRL(data.summary.saldo)} disponível`
+                                        : `Déficit de R$ ${formatBRL(Math.abs(data.summary.saldo))}`
+                                }
+                                icon={<Percent size={16} />}
+                                warning={taxaPoupanca < 0}
                             />
                         )}
                     </div>
 
-                    {/* ── Seção 3: Radar de Atenção ───────────────────────────────── */}
-                    <div className="flex gap-3 mb-6 overflow-x-auto pb-1">
+                    {/* ── Seção 3: Destaques do Mês ───────────────────────────────── */}
+                    <div className="grid grid-cols-3 gap-3 mb-6">
                         {(data.insights ?? []).map((insight, i) => (
                             <RadarCard
                                 key={i}

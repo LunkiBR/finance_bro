@@ -15,11 +15,12 @@ import {
     Zap,
     Tags,
     X,
+    BookOpen,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
 const mainItems = [
-    { href: "/dashboard",  label: "Início",     icon: LayoutDashboard },
+    { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
     { href: "/transacoes", label: "Transações",  icon: List },
     { href: "/copiloto",   label: "Copiloto",    icon: MessageSquare, primary: true },
     { href: "/orcamentos", label: "Orçamentos",  icon: PieChart },
@@ -32,6 +33,7 @@ const moreItems = [
     { href: "/alertas",       label: "Alertas",       icon: Bell, badge: true },
     { href: "/importar",      label: "Importar",      icon: Upload },
     { href: "/configuracoes", label: "Configurações", icon: Settings },
+    { href: "/bem-vindo",     label: "Como usar",     icon: BookOpen },
 ];
 
 export function MobileNav() {

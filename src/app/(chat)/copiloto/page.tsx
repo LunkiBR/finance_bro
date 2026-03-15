@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Menu } from "lucide-react";
 import { ChatHistory } from "@/components/layout/chat-history";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessage } from "@/components/chat/chat-message";
@@ -19,6 +20,8 @@ export default function CopilotoPage() {
         retryLastMessage,
     } = useChatStream();
 
+    const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+
     const bottomRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -28,27 +31,47 @@ export default function CopilotoPage() {
     const isEmpty = messages.length === 0;
 
     return (
-        <div className="flex h-full w-full">
+        <div className="flex h-full w-full relative">
             {/* Chat History - Left sidebar */}
             <ChatHistory
                 activeId={conversationId}
                 onSelect={loadConversation}
                 onNew={resetConversation}
+                mobileOpen={mobileHistoryOpen}
+                onCloseMobile={() => setMobileHistoryOpen(false)}
             />
 
             {/* Main Chat Area */}
             <div className="flex-1 flex flex-col min-w-0 relative h-full overflow-hidden">
+                {/* Mobile History Toggle Icon (Top Left) */}
+                <button
+                    onClick={() => setMobileHistoryOpen(true)}
+                    className="md:hidden absolute z-10 p-2 rounded-full transition-colors flex items-center justify-center"
+                    style={{ 
+                        top: "calc(16px + env(safe-area-inset-top))",
+                        left: "16px",
+                        background: "var(--bg-elevated)", 
+                        color: "var(--text-primary)",
+                        border: "1px solid var(--border)",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.2)"
+                    }}
+                >
+                    <Menu size={20} strokeWidth={2.5} />
+                </button>
+
                 {isEmpty ? (
-                    /* ── Empty state: exactly like ChatGPT ── */
-                    <div className="flex-1 flex flex-col items-center justify-center px-4">
-                        <h1
-                            className="text-[28px] font-semibold mb-10 tracking-tight text-center"
-                            style={{ color: "var(--text-primary)" }}
-                        >
-                            Por onde começamos?
-                        </h1>
-                        <div className="w-full max-w-[760px]">
-                            <ChatInput onSend={sendMessage} disabled={isLoading} />
+                    /* ── Empty state ── */
+                    <div className="flex-1 flex flex-col items-center justify-center px-4 pt-16 md:pt-0 pb-6">
+                        <div className="w-full max-w-[680px] flex flex-col items-center">
+                            <h1
+                                className="text-[24px] md:text-[30px] font-semibold mb-6 tracking-tight text-center w-full"
+                                style={{ color: "var(--text-primary)" }}
+                            >
+                                Por onde começamos?
+                            </h1>
+                            <div className="w-full">
+                                <ChatInput onSend={sendMessage} disabled={isLoading} />
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -78,9 +101,9 @@ export default function CopilotoPage() {
 
                         {/* Fixed bottom input — gradient fade above it */}
                         <div
-                            className="absolute bottom-0 left-0 right-0 flex justify-center px-4 pb-6 pt-10"
+                            className="absolute bottom-0 left-0 right-0 flex justify-center px-4 pb-6 md:pb-6 pt-10"
                             style={{
-                                background: "linear-gradient(to bottom, transparent, var(--bg-base) 50%)",
+                                background: "linear-gradient(to bottom, transparent, var(--bg-base) 60%)",
                                 pointerEvents: "none",
                             }}
                         >

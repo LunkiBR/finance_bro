@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Plus } from "lucide-react";
 
 interface ChatInputProps {
     onSend: (message: string) => void;
@@ -47,7 +47,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         <div className="w-full">
             {/* Quick prompts — only show when not loading */}
             {!disabled && (
-                <div className="flex gap-2 mb-3 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+                <div className="flex gap-2 mb-4 overflow-x-auto pb-1 px-1 no-scrollbar" style={{ scrollbarWidth: "none" }}>
                     {QUICK_ACTIONS.map((action) => (
                         <button
                             key={action}
@@ -70,53 +70,58 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                             {action}
                         </button>
                     ))}
+                    <div className="w-4 shrink-0" /> {/* Extra padding for scroll-end */}
                 </div>
             )}
 
-            {/* ChatGPT-style pill input */}
+            {/* Perplexity-style pill input */}
             <div
-                className="relative flex items-end rounded-[16px] border px-4 py-3 transition-all"
+                className="relative flex items-end rounded-[32px] border px-3 py-2.5 transition-all"
                 style={{
                     background: "var(--bg-elevated)",
                     borderColor: "var(--border)",
                     boxShadow: "0 0 0 1px rgba(255,255,255,0.04), 0 8px 32px -8px rgba(0,0,0,0.5)",
+                    minHeight: "56px"
                 }}
             >
-                {/* "+" / attach stub (decorative, matches ChatGPT left icon) */}
-                <div
-                    className="mr-3 shrink-0 mb-[2px]"
-                    style={{ color: "var(--text-muted)" }}
+                {/* "+" / attach stub */}
+                <button
+                    className="mr-3 shrink-0 mb-[3px] w-[32px] h-[32px] rounded-full flex items-center justify-center transition-colors hover:opacity-80"
+                    style={{ 
+                        background: "rgba(255,255,255,0.05)",
+                        color: "var(--text-primary)"
+                    }}
+                    disabled={disabled}
                 >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
-                    </svg>
-                </div>
+                    <Plus size={18} strokeWidth={2.5} />
+                </button>
 
                 <textarea
                     ref={textareaRef}
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Pergunte alguma coisa"
+                    placeholder="Pergunte qualquer coisa"
                     rows={1}
                     disabled={disabled}
-                    className="flex-1 bg-transparent resize-none text-[15px] outline-none leading-relaxed"
+                    className="flex-1 bg-transparent resize-none text-[16px] md:text-[15px] outline-none leading-normal py-1.5"
                     style={{
                         color: "var(--text-primary)",
-                        maxHeight: "200px",
-                        caretColor: "var(--accent-blue)",
+                        maxHeight: "150px",
+                        caretColor: "#26B5B3",
+                        minHeight: "24px"
                     }}
                 />
 
-                {/* Send button — blue circle like ChatGPT */}
+                {/* Send button */}
                 <button
                     onClick={handleSend}
                     disabled={!value.trim() || disabled}
-                    className="ml-3 shrink-0 mb-[2px] w-[34px] h-[34px] rounded-full flex items-center justify-center transition-all"
+                    className="ml-3 shrink-0 mb-[1px] w-[36px] h-[36px] rounded-full flex items-center justify-center transition-all"
                     style={{
-                        background: value.trim() && !disabled ? "var(--accent-blue)" : "var(--bg-surface)",
-                        color: value.trim() && !disabled ? "#fff" : "var(--text-muted)",
-                        opacity: disabled && value.trim() ? 0.5 : 1,
+                        background: value.trim() && !disabled ? "#26B5B3" : "var(--bg-surface)",
+                        color: value.trim() && !disabled ? "#000" : "var(--text-muted)",
+                        opacity: disabled && value.trim() ? 0.6 : 1,
                     }}
                 >
                     {disabled
@@ -126,7 +131,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
                                 style={{ background: "currentColor" }}
                             />
                         )
-                        : <ArrowUp size={16} />
+                        : <ArrowUp size={18} strokeWidth={2.5} />
                     }
                 </button>
             </div>

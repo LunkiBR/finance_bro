@@ -4,7 +4,8 @@ import { db } from "@/db";
 import { transactions, budgets, goals, alerts, userProfile, payeeMappings } from "@/db/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import type { ChartSpec } from "./chart-types";
-import { CATEGORY_TAXONOMY, ALL_CATEGORIES, isValidCategory } from "./categories";
+import { CATEGORY_TAXONOMY, ALL_CATEGORIES, isValidCategory, isValidCategoryIn } from "./categories";
+import { getMergedTaxonomy, buildCategoryPromptSection } from "./categories-server";
 
 export const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
 
@@ -17,8 +18,19 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
     const monthNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
     const currentMonth = `${monthNames[now.getMonth()]}/${String(now.getFullYear()).slice(2)}`;
 
+    // Helper for recurring query lookback months
+    const prevMonthFn = (m: string) => {
+      const [mo, yr] = m.split("/");
+      const idx = monthNames.indexOf(mo);
+      if (idx === 0) return `dez/${String(parseInt(yr) - 1).padStart(2, "0")}`;
+      return `${monthNames[idx - 1]}/${yr}`;
+    };
+    const snapshotPrev1 = prevMonthFn(currentMonth);
+    const snapshotPrev2 = prevMonthFn(snapshotPrev1);
+    const snapshotPrev3 = prevMonthFn(snapshotPrev2);
+
     // Run all queries in parallel
-    const [monthlySummary, budgetStatus, activeGoals, activeAlerts, profile] = await Promise.all([
+    const [monthlySummary, budgetStatus, activeGoals, activeAlerts, profile, recurringSnapshot] = await Promise.all([
       // Monthly summary for last 2 months
       db.select({
         month: transactions.month,
@@ -43,6 +55,23 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
 
       // User profile
       db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1),
+
+      // Recurring beneficiaries (appeared in ≥2 of last 3 completed months)
+      db.select({
+        beneficiary: transactions.beneficiary,
+        category: sql<string>`MAX(${transactions.category})`,
+        avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
+      })
+        .from(transactions)
+        .where(and(
+          eq(transactions.userId, userId),
+          inArray(transactions.month, [snapshotPrev1, snapshotPrev2, snapshotPrev3]),
+          eq(transactions.type, "despesa"),
+        ))
+        .groupBy(transactions.beneficiary)
+        .having(sql`COUNT(DISTINCT ${transactions.month}) >= 2`)
+        .orderBy(desc(sql`AVG(${transactions.amount}::numeric)`))
+        .limit(8),
     ]);
 
     // Build monthly summary structure
@@ -125,6 +154,19 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
       lines.push("");
       lines.push(`🎯 Metas ativas:`);
       goalsInfo.forEach((g) => lines.push(`  • ${g}`));
+    }
+
+    // Recurring expenses snapshot
+    if (recurringSnapshot.length > 0) {
+      const recurringTotal = recurringSnapshot.reduce((s, r) => s + Number(r.avgAmount), 0);
+      lines.push("");
+      lines.push(`🔁 Gastos recorrentes (comprometido ~R$ ${recurringTotal.toFixed(2)}/mês):`);
+      recurringSnapshot.slice(0, 5).forEach((r) => {
+        lines.push(`  • ${r.beneficiary} (${r.category ?? "Outros"}): ~R$ ${Number(r.avgAmount).toFixed(2)}/mês`);
+      });
+      if (recurringSnapshot.length > 5) {
+        lines.push(`  • … e mais ${recurringSnapshot.length - 5} recorrentes`);
+      }
     }
 
     // Alerts
@@ -414,6 +456,69 @@ export const financeTools: FunctionDeclaration[] = [
     name: "list_categories",
     description: "Lista todas as categorias e subcategorias disponíveis no sistema.",
     parameters: { type: SchemaType.OBJECT, properties: {} },
+  },
+
+  // ── BEHAVIORAL ANALYSIS ──
+  {
+    name: "analyze_spending_behavior",
+    description:
+      "Analisa padrões comportamentais que impulsionam os gastos do usuário nos últimos 3 meses. " +
+      "Identifica: padrão de fim de semana (mais gasto por dia sáb/dom vs dias úteis), subscription creep " +
+      "(assinaturas acumuladas invisíveis), ansiedade de status (categorias Vestuário/Beleza/Eletrônicos acima da média), " +
+      "compras por impulso (transações > 2× a média da categoria). " +
+      "Retorna dominantBias: weekend_pattern | status_anxiety | impulse_buying | subscription_creep | none_detected. " +
+      "Use quando o usuário perguntar 'por que gasto tanto?', 'qual atitude me faz gastar mais?' " +
+      "ou ao fazer diagnóstico mensal completo ('como estou?').",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        month: {
+          type: SchemaType.STRING,
+          description: "Mês no formato 'jan/26'. Se omitido, analisa os últimos 3 meses.",
+        },
+      },
+    },
+  },
+
+  // ── COMMITTED INCOME BREAKDOWN ──
+  {
+    name: "get_committed_income_breakdown",
+    description:
+      "Retorna o detalhamento de quanto da renda já está comprometida: gastos recorrentes fixos " +
+      "(beneficiários que aparecem em ≥2 dos últimos 3 meses), contribuições para metas ativas e quanto sobra livre. " +
+      "Retorna: receitas, committed (total + pct + lista de itens), variableSpent, freeToSpend, freePct, commitmentLevel " +
+      "(healthy/moderate/high/critical). " +
+      "Use SEMPRE que o usuário perguntar 'quanto tenho disponível?', 'posso comprar X?', 'quanto ainda posso gastar?' " +
+      "ou quando o comprometimento for alto (>60%).",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        month: {
+          type: SchemaType.STRING,
+          description: "Mês no formato 'jan/26'. Se omitido, usa o mês atual.",
+        },
+      },
+    },
+  },
+
+  // ── FINANCIAL FORECAST ──
+  {
+    name: "get_financial_forecast",
+    description:
+      "Projeta o futuro financeiro do usuário com base nas tendências recentes (últimos 3 meses). " +
+      "Calcula: se os padrões atuais continuarem, qual será o saldo acumulado em N meses, " +
+      "quando cada meta ativa será atingida, e emite avisos se a taxa de poupança for insuficiente. " +
+      "Use quando o usuário perguntar 'quando vou conseguir X?', 'como estarei em 6 meses?', " +
+      "'minha meta é viável?' ou ao avaliar a sustentabilidade de um plano financeiro.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        months_ahead: {
+          type: SchemaType.INTEGER,
+          description: "Quantos meses à frente projetar (1–24). Default: 6.",
+        },
+      },
+    },
   },
 ];
 
@@ -748,7 +853,9 @@ export async function executeTool(
         transactionId: string; category: string; subcategory?: string; pinPayee?: boolean;
       };
 
-      if (!isValidCategory(category)) {
+      // Validar contra taxonomy merged (defaults + custom do usuário)
+      const mergedTax = await getMergedTaxonomy(userId);
+      if (!isValidCategoryIn(category, mergedTax)) {
         return { result: { error: `Categoria "${category}" não é válida. Use list_categories para ver as opções.` } };
       }
 
@@ -861,12 +968,362 @@ Retorne APENAS um JSON válido (sem markdown):
 
     // ── list_categories ──
     case "list_categories": {
-      const cats = ALL_CATEGORIES.map(cat => ({
-        category: cat,
-        subcategories: CATEGORY_TAXONOMY[cat].subcategories,
-        type: CATEGORY_TAXONOMY[cat].type,
+      const taxonomy = await getMergedTaxonomy(userId);
+      const cats = Object.entries(taxonomy).map(([name, info]) => ({
+        category: name,
+        subcategories: info.subcategories,
+        type: info.type,
+        isCustom: info.isCustom,
+        ...(info.aiContext ? { aiContext: info.aiContext } : {}),
       }));
       return { result: cats };
+    }
+
+    // ── analyze_spending_behavior ──
+    case "analyze_spending_behavior": {
+      const { month: inputMonth } = input as { month?: string };
+      const now = new Date();
+      const mNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+      const curMonth = inputMonth ?? `${mNames[now.getMonth()]}/${String(now.getFullYear()).slice(2)}`;
+
+      const prevMFn = (m: string) => {
+        const [mo, yr] = m.split("/");
+        const idx = mNames.indexOf(mo);
+        if (idx === 0) return `dez/${String(parseInt(yr) - 1).padStart(2, "0")}`;
+        return `${mNames[idx - 1]}/${yr}`;
+      };
+      const bPrev1 = prevMFn(curMonth);
+      const bPrev2 = prevMFn(bPrev1);
+      const analysisMonths = [curMonth, bPrev1, bPrev2];
+      const monthsIn = sql.join(analysisMonths.map(m => sql`${m}`), sql`, `);
+
+      const [weekendRows, recurringRows, categoryMomRows, impulseRows] = await Promise.all([
+        // 1. Weekend vs weekday
+        db.execute(sql`
+          SELECT
+            CASE WHEN EXTRACT(DOW FROM date::date) IN (0, 6) THEN 'weekend' ELSE 'weekday' END AS day_type,
+            ROUND(SUM(amount::numeric), 2) AS total,
+            COUNT(*) AS count
+          FROM ff_transactions
+          WHERE user_id = ${userId}
+            AND type = 'despesa'
+            AND month IN (${monthsIn})
+          GROUP BY day_type
+        `),
+
+        // 2. Recurring beneficiaries (subscription creep)
+        db.execute(sql`
+          SELECT beneficiary,
+            MAX(category) AS category,
+            ROUND(AVG(amount::numeric), 2) AS avg_amount,
+            COUNT(DISTINCT month) AS month_count
+          FROM ff_transactions
+          WHERE user_id = ${userId}
+            AND type = 'despesa'
+            AND month IN (${monthsIn})
+          GROUP BY beneficiary
+          HAVING COUNT(DISTINCT month) >= 2
+          ORDER BY avg_amount DESC
+          LIMIT 15
+        `),
+
+        // 3. Category MoM for status anxiety detection
+        db.execute(sql`
+          SELECT category, month, ROUND(SUM(amount::numeric), 2) AS total
+          FROM ff_transactions
+          WHERE user_id = ${userId}
+            AND type = 'despesa'
+            AND month IN (${monthsIn})
+          GROUP BY category, month
+          ORDER BY category, month
+        `),
+
+        // 4. Impulse: transactions > 2× avg for their category AND > R$50
+        db.execute(sql`
+          SELECT t.id, t.date, t.description, t.beneficiary, t.category, t.amount, t.month,
+            cat_avg.avg_amount
+          FROM ff_transactions t
+          JOIN (
+            SELECT category, ROUND(AVG(amount::numeric), 2) AS avg_amount
+            FROM ff_transactions
+            WHERE user_id = ${userId} AND type = 'despesa' AND month IN (${monthsIn})
+            GROUP BY category
+          ) cat_avg ON t.category = cat_avg.category
+          WHERE t.user_id = ${userId}
+            AND t.type = 'despesa'
+            AND t.month IN (${monthsIn})
+            AND t.amount::numeric > cat_avg.avg_amount * 2.0
+            AND t.amount::numeric > 50
+          ORDER BY t.amount::numeric DESC
+          LIMIT 10
+        `),
+      ]);
+
+      type WRow = { day_type: string; total: string; count: string };
+      const wData = weekendRows.rows as WRow[];
+      const wkEnd = wData.find(r => r.day_type === "weekend");
+      const wkDay = wData.find(r => r.day_type === "weekday");
+      const wkEndAvgPerDay = wkEnd ? Number(wkEnd.total) / (analysisMonths.length * 8) : 0;
+      const wkDayAvgPerDay = wkDay ? Number(wkDay.total) / (analysisMonths.length * 22) : 0;
+      const weekendPremiumPct = wkDayAvgPerDay > 0
+        ? Math.round(((wkEndAvgPerDay - wkDayAvgPerDay) / wkDayAvgPerDay) * 100) : 0;
+
+      type RRow = { beneficiary: string; category: string; avg_amount: string; month_count: string };
+      const rData = recurringRows.rows as RRow[];
+      const subscriptionCats = ["streaming", "assinatura", "software", "internet", "telefonia"];
+      const confirmedSubscriptions = rData.filter(r =>
+        subscriptionCats.some(sc => (r.category ?? "").toLowerCase().includes(sc))
+      );
+      const subscriptionTotal = confirmedSubscriptions.reduce((s, r) => s + Number(r.avg_amount), 0);
+
+      type CRow = { category: string; month: string; total: string };
+      const cData = categoryMomRows.rows as CRow[];
+      const catMonthMap: Record<string, Record<string, number>> = {};
+      for (const row of cData) {
+        if (!catMonthMap[row.category]) catMonthMap[row.category] = {};
+        catMonthMap[row.category][row.month] = Number(row.total);
+      }
+      const statusCats = ["Vestuário", "Beleza", "Eletrônicos", "Lazer"];
+      const statusAnxietySignals = statusCats
+        .map(cat => {
+          const data = catMonthMap[cat];
+          if (!data) return null;
+          const recent = data[curMonth] ?? 0;
+          const prevVals = [bPrev1, bPrev2].map(m => data[m] ?? 0);
+          const avg = prevVals.reduce((s, v) => s + v, 0) / Math.max(prevVals.filter(v => v > 0).length, 1);
+          const pct = avg > 0 ? Math.round(((recent - avg) / avg) * 100) : 0;
+          return { category: cat, recent, avg: Math.round(avg * 100) / 100, pctAboveAvg: pct };
+        })
+        .filter(Boolean)
+        .filter(s => s!.pctAboveAvg > 30 && s!.recent > 50)
+        .sort((a, b) => b!.pctAboveAvg - a!.pctAboveAvg);
+
+      const dominantBias = weekendPremiumPct > 40 ? "weekend_pattern"
+        : statusAnxietySignals.length > 0 ? "status_anxiety"
+        : (impulseRows.rows as unknown[]).length >= 3 ? "impulse_buying"
+        : subscriptionTotal > 200 ? "subscription_creep"
+        : "none_detected";
+
+      return {
+        result: {
+          analysisMonths,
+          weekendPattern: {
+            weekendSpend: wkEnd ? Number(wkEnd.total) : 0,
+            weekdaySpend: wkDay ? Number(wkDay.total) : 0,
+            weekendAvgPerDay: Math.round(wkEndAvgPerDay * 100) / 100,
+            weekdayAvgPerDay: Math.round(wkDayAvgPerDay * 100) / 100,
+            weekendPremiumPct,
+            signal: weekendPremiumPct > 40 ? "HIGH" : weekendPremiumPct > 15 ? "MEDIUM" : "LOW",
+          },
+          subscriptionCreep: {
+            confirmedSubscriptions,
+            subscriptionTotal: Math.round(subscriptionTotal * 100) / 100,
+            count: confirmedSubscriptions.length,
+            signal: subscriptionTotal > 200 ? "HIGH" : subscriptionTotal > 100 ? "MEDIUM" : "LOW",
+          },
+          statusAnxietySignals,
+          impulseTransactions: impulseRows.rows,
+          dominantBias,
+        },
+      };
+    }
+
+    // ── get_committed_income_breakdown ──
+    case "get_committed_income_breakdown": {
+      const { month: inputMonth } = input as { month?: string };
+      const now = new Date();
+      const mNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+      const curMonth = inputMonth ?? `${mNames[now.getMonth()]}/${String(now.getFullYear()).slice(2)}`;
+
+      const prevMFn2 = (m: string) => {
+        const [mo, yr] = m.split("/");
+        const idx = mNames.indexOf(mo);
+        if (idx === 0) return `dez/${String(parseInt(yr) - 1).padStart(2, "0")}`;
+        return `${mNames[idx - 1]}/${yr}`;
+      };
+      const cPrev1 = prevMFn2(curMonth);
+      const cPrev2 = prevMFn2(cPrev1);
+      const cPrev3 = prevMFn2(cPrev2);
+
+      const [incomeSummary, recurringQ, activeGoals2, currentExpenses] = await Promise.all([
+        db.select({ total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)` })
+          .from(transactions)
+          .where(and(eq(transactions.userId, userId), eq(transactions.month, curMonth), eq(transactions.type, "receita"))),
+
+        db.select({
+          beneficiary: transactions.beneficiary,
+          category: sql<string>`MAX(${transactions.category})`,
+          avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
+          monthCount: sql<number>`COUNT(DISTINCT ${transactions.month})`,
+        })
+          .from(transactions)
+          .where(and(
+            eq(transactions.userId, userId),
+            inArray(transactions.month, [cPrev1, cPrev2, cPrev3]),
+            eq(transactions.type, "despesa"),
+          ))
+          .groupBy(transactions.beneficiary)
+          .having(sql`COUNT(DISTINCT ${transactions.month}) >= 2`)
+          .orderBy(desc(sql`AVG(${transactions.amount}::numeric)`)),
+
+        db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.status, "active"))),
+
+        db.select({
+          beneficiary: transactions.beneficiary,
+          total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
+        })
+          .from(transactions)
+          .where(and(eq(transactions.userId, userId), eq(transactions.month, curMonth), eq(transactions.type, "despesa")))
+          .groupBy(transactions.beneficiary),
+      ]);
+
+      const receitas2 = Number(incomeSummary[0]?.total ?? 0);
+      const recurringBens = new Set(recurringQ.map(r => r.beneficiary));
+      const estimatedRec = recurringQ.reduce((s, r) => s + Number(r.avgAmount), 0);
+
+      const goalContrib2 = activeGoals2
+        .filter(g => g.deadline)
+        .reduce((sum, g) => {
+          const deadline = new Date(g.deadline!);
+          const monthsLeft = Math.max(1,
+            (deadline.getFullYear() - now.getFullYear()) * 12 +
+            (deadline.getMonth() - now.getMonth())
+          );
+          return sum + Math.max(0, Number(g.targetAmount) - Number(g.currentAmount)) / monthsLeft;
+        }, 0);
+
+      const varSpent2 = currentExpenses
+        .filter(r => !recurringBens.has(r.beneficiary))
+        .reduce((s, r) => s + Number(r.total), 0);
+
+      const committedTotal2 = estimatedRec + goalContrib2;
+      const committedPct2 = receitas2 > 0 ? Math.round((committedTotal2 / receitas2) * 100) : 0;
+      const varPct2 = receitas2 > 0 ? Math.round((varSpent2 / receitas2) * 100) : 0;
+      const freePct2 = Math.max(0, 100 - committedPct2 - varPct2);
+      const freeToSpend2 = receitas2 - committedTotal2 - varSpent2;
+
+      const subKeywords = ["netflix", "spotify", "amazon", "disney", "hbo", "youtube", "adobe", "canva", "notion"];
+      const taggedItems = recurringQ.map(r => ({
+        beneficiary: r.beneficiary,
+        category: r.category ?? "Outros",
+        avgAmount: Number(r.avgAmount),
+        tag: subKeywords.some(k => r.beneficiary.toLowerCase().includes(k)) ||
+          (r.category ?? "").toLowerCase().includes("assinatura") ||
+          (r.category ?? "").toLowerCase().includes("streaming")
+          ? "subscription" : "fixed_bill",
+      }));
+
+      return {
+        result: {
+          month: curMonth,
+          receitas: Math.round(receitas2 * 100) / 100,
+          committed: {
+            total: Math.round(committedTotal2 * 100) / 100,
+            pct: committedPct2,
+            recurringExpenses: Math.round(estimatedRec * 100) / 100,
+            goalContributions: Math.round(goalContrib2 * 100) / 100,
+            items: taggedItems,
+          },
+          variableSpent: Math.round(varSpent2 * 100) / 100,
+          variablePct: varPct2,
+          freeToSpend: Math.round(freeToSpend2 * 100) / 100,
+          freePct: freePct2,
+          commitmentLevel: committedPct2 > 80 ? "critical"
+            : committedPct2 > 60 ? "high"
+            : committedPct2 > 40 ? "moderate"
+            : "healthy",
+        },
+      };
+    }
+
+    // ── get_financial_forecast ──
+    case "get_financial_forecast": {
+      const { months_ahead = 6 } = input as { months_ahead?: number };
+      const clampedMonths = Math.min(Math.max(months_ahead, 1), 24);
+      const now = new Date();
+      const mNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+      const summaryRows = await db.select({
+        month: transactions.month,
+        type: transactions.type,
+        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
+      })
+        .from(transactions)
+        .where(eq(transactions.userId, userId))
+        .groupBy(transactions.month, transactions.type)
+        .orderBy(desc(transactions.month))
+        .limit(12);
+
+      const mMap: Record<string, { receitas: number; despesas: number }> = {};
+      for (const row of summaryRows) {
+        if (!mMap[row.month]) mMap[row.month] = { receitas: 0, despesas: 0 };
+        mMap[row.month][row.type === "receita" ? "receitas" : "despesas"] = Number(row.total);
+      }
+
+      const recentMonths = Object.entries(mMap)
+        .sort(([a], [b]) => b.localeCompare(a))
+        .slice(0, 3)
+        .map(([m, v]) => ({ month: m, ...v }));
+
+      if (recentMonths.length === 0) {
+        return { result: { error: "Sem dados históricos suficientes para projeção." } };
+      }
+
+      const avgReceitas = recentMonths.reduce((s, m) => s + m.receitas, 0) / recentMonths.length;
+      const avgDespesas = recentMonths.reduce((s, m) => s + m.despesas, 0) / recentMonths.length;
+      const avgSaldo = avgReceitas - avgDespesas;
+      const savingsRate = avgReceitas > 0 ? avgSaldo / avgReceitas : 0;
+
+      const activeGoals3 = await db.select().from(goals)
+        .where(and(eq(goals.userId, userId), eq(goals.status, "active")));
+
+      const projections = [];
+      let cumulativeSaldo = 0;
+      for (let i = 1; i <= clampedMonths; i++) {
+        const projDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const projMonth = `${mNames[projDate.getMonth()]}/${String(projDate.getFullYear()).slice(2)}`;
+        cumulativeSaldo += avgSaldo;
+        projections.push({
+          month: projMonth,
+          projectedSaldo: Math.round(avgSaldo * 100) / 100,
+          cumulativeSaldo: Math.round(cumulativeSaldo * 100) / 100,
+        });
+      }
+
+      const goalProjections = activeGoals3.map(g => {
+        const remaining = Math.max(0, Number(g.targetAmount) - Number(g.currentAmount));
+        if (avgSaldo <= 0) {
+          return { goalName: g.name, monthsToReach: null, message: "Saldo médio negativo — meta não atingível nesse ritmo." };
+        }
+        const monthsToReach = Math.ceil(remaining / avgSaldo);
+        const targetDate = new Date(now.getFullYear(), now.getMonth() + monthsToReach, 1);
+        const projectedMonth = `${mNames[targetDate.getMonth()]}/${String(targetDate.getFullYear()).slice(2)}`;
+        return {
+          goalName: g.name,
+          remaining: Math.round(remaining * 100) / 100,
+          monthsToReach,
+          projectedCompletionMonth: projectedMonth,
+          onTrack: g.deadline ? new Date(g.deadline) >= targetDate : null,
+        };
+      });
+
+      return {
+        result: {
+          baseline: {
+            avgMonthlyReceitas: Math.round(avgReceitas * 100) / 100,
+            avgMonthlyDespesas: Math.round(avgDespesas * 100) / 100,
+            avgMonthlySaldo: Math.round(avgSaldo * 100) / 100,
+            savingsRatePct: Math.round(savingsRate * 100),
+            basedOnMonths: recentMonths.map(m => m.month),
+          },
+          projections,
+          goalProjections,
+          warnings: [
+            ...(avgSaldo < 0 ? ["Saldo médio negativo — acúmulo de dívidas projetado."] : []),
+            ...(savingsRate < 0.1 && avgSaldo >= 0 ? ["Taxa de poupança abaixo de 10% — vulnerável a imprevistos."] : []),
+          ],
+        },
+      };
     }
 
     default:
@@ -876,47 +1333,52 @@ Retorne APENAS um JSON válido (sem markdown):
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
-export const getSystemPrompt = (userName: string = "usuário") => `Você é o Finance Friend — o CFO pessoal de ${userName} e também seu coach financeiro.
+export const getSystemPrompt = async (userName: string = "usuário", userId?: string) => {
+  // Gera seção de categorias dinamicamente (defaults + custom do usuário)
+  let categorySection: string;
+  if (userId) {
+    const taxonomy = await getMergedTaxonomy(userId);
+    categorySection = buildCategoryPromptSection(taxonomy);
+  } else {
+    // Fallback: só defaults (sem userId)
+    const lines = ALL_CATEGORIES.map((cat, i) => {
+      const info = CATEGORY_TAXONOMY[cat];
+      return `${i + 1}. **${cat}** (${info.type}) → ${info.subcategories.join(", ")}`;
+    });
+    categorySection = lines.join("\n");
+  }
+
+  return `Você é o Finance Friend — o sistema operacional financeiro de ${userName}.
 
 Sua função NÃO é agradar. É **proteger o dinheiro de ${userName}, reduzir erros de comportamento e ensinar finanças de forma prática**.
 
-Você combina três papéis:
-1. **Analista numérico frio** — dados, porcentagens, gráficos, veredictos claros.
-2. **Coach** — faz perguntas que desafiam crenças, não aceita "depois eu resolvo".
-3. **Professor** — explica conceitos em linguagem simples, sempre com exemplos do histórico real de ${userName}.
+Você combina quatro papéis:
+1. **Analista** — dados, %, gráficos, veredictos claros baseados em evidência.
+2. **Coach comportamental** — identifica padrões psicológicos que sabotam o dinheiro e confronta com empatia.
+3. **Professor** — ensina conceitos com exemplos reais do histórico de ${userName}, não teoria genérica.
+4. **Sistema operacional** — orquestra orçamentos, metas e alertas proativamente, sem esperar perguntas.
 
 Você tem acesso completo ao histórico financeiro pelas ferramentas. No início de cada mensagem você recebe um CONTEXTO FINANCEIRO ATUAL atualizado com receitas, despesas, orçamentos e metas.
 
+## Modelo Mental (consulte antes de CADA resposta)
+
+Antes de responder, atualize mentalmente:
+1. **Onde estamos no mês?** — Salário já caiu? Fatura fecha quando? Quantos dias restam?
+2. **Hierarquia de prioridades** (SEMPRE nesta ordem):
+   - 🔴 Segurança: reserva de emergência ≥ 3 meses, quitação de dívidas de juros altos
+   - 🟡 Estabilidade: orçamentos cumpridos, gastos previsíveis, carga fixa < 60%
+   - 🟢 Crescimento: investimentos, metas ambiciosas, otimização
+3. **Tendências deste usuário** — Que vieses já apareceram? (consulte aiNotes e contexto)
+4. **Comprometimento** — Quanto da renda já está travado antes de qualquer decisão?
+
+Nunca sugira ações de nível 🟢 se há problemas em nível 🔴.
+
 ---
 
-## Sistema de Categorias (20 categorias com subcategorias)
-O sistema usa 20 categorias com subcategorias detalhadas:
+## Sistema de Categorias
+O sistema usa categorias com subcategorias detalhadas. Categorias marcadas com _Contexto_ e _Exemplos no extrato_ são personalizadas pelo usuário — use essas informações para categorizar corretamente.
 
-**DESPESAS:**
-1. **Moradia** → Aluguel / Financiamento, Condomínio, Energia, Água e Esgoto, Gás, Internet, IPTU, Manutenção e Reparos, Móveis e Eletrodomésticos, Serviços Domésticos
-2. **Alimentação** → Supermercado, Hortifruti, Restaurante, Fast Food, Delivery, Padaria e Café, Cafeteria, Bar e Petisco
-3. **Transporte** → Apps, Combustível, Estacionamento / Pedágio, Transporte Público, Ônibus Rodoviário, Passagem Aérea, Manutenção do Veículo, Seguro do Veículo, Documentação Veicular
-4. **Contas e Utilidades** → Internet Residencial, Telefone e Celular, TV por Assinatura, Serviços de Nuvem, Serviços Bancários
-5. **Saúde e Bem-Estar** → Plano de Saúde, Consulta Médica, Farmácia, Terapia / Psicólogo, Academia, Bem-estar
-6. **Educação** → Mensalidade Escolar / Faculdade, Cursos e Treinamentos, Livros e Materiais, Papelaria
-7. **Trabalho e Negócios** → Equipamentos de Trabalho, Softwares e Ferramentas, Transporte a Trabalho, Alimentação no Trabalho, Despesas MEI / PJ
-8. **Lazer e Entretenimento** → Viagem, Bar e Balada, Cinema e Teatro, Jogos e Games, Esporte, Eventos e Festas
-9. **Compras e E-commerce** → Roupas e Calçados, Beleza e Cosméticos, Eletrônicos, Casa e Decoração, E-commerce Geral, Presentes
-10. **Família e Dependentes** → Despesas com Filhos, Pensão / Manutenção, Ajuda Financeira a Família
-11. **Assinaturas e Serviços** → Streaming, SaaS e Ferramentas, Telefone e Celular, Seguro, Clube de Benefícios, Apps de Produtividade, Jogos por Assinatura
-12. **Impostos e Taxas** → IOF, Taxa Bancária, Juros e Multas Bancárias, Imposto de Renda, Outros Impostos
-13. **Dívidas e Crédito** → Pagamento de Fatura, Empréstimo Pessoal, Empréstimo Consignado, Financiamento de Veículo, Outras Dívidas, Juros sobre Dívidas
-14. **Investimentos e Patrimônio** → Renda Fixa, Renda Variável, Criptoativos, Previdência Privada, Outros Investimentos, Corretagem e Taxas
-15. **Poupança e Reservas** → Reserva de Emergência, Poupança Curto Prazo, Cofrinhos / Caixinhas
-
-**MISTAS:**
-16. **Transferências Pessoais** → Transferência Própria, Amigos, Conhecidos, Transferência para Terceiros, Split de Contas
-17. **Cartão de Crédito** → Pagamento de Fatura, Ajuste / Crédito, Estorno em Fatura
-18. **Outros** → Doações e Caridade, Serviços Diversos, Outros
-19. **Dúvida** → Dúvida
-
-**RECEITAS:**
-20. **Receita** → Salário e Repasse, Freelance, Bônus / Comissões / PLR, Receita de Investimentos, Família, Estorno, Transferência Própria
+${categorySection}
 
 ---
 
@@ -925,7 +1387,7 @@ O sistema usa 20 categorias com subcategorias detalhadas:
 Cada resposta analítica deve conter SEMPRE na seguinte ordem:
 1. **Bloco analítico** — números reais das ferramentas, categorias específicas com valores em R$, variações com %. Use **negrito** para valores-chave. Use bullet points para cada categoria ou item relevante. Nunca escreva parágrafos genéricos sem números.
 2. **Bloco educativo** — o que ${userName} está aprendendo com ESSES dados (máx. 3 frases, ligado ao histórico real dele). Não teoria genérica.
-3. **Próximo passo mínimo** — uma única ação concreta e específica (com R$ e prazo quando aplicável). Não uma lista. Uma coisa.
+3. **Próximo passo — UMA ação concreta** — com valor em R$, prazo, e de onde vem o dinheiro. Se relevante, inclua: "Posso perguntar sobre isso na próxima conversa?"
 
 **Atenção ao escopo da resposta**: Se a pergunta for extremamente específica (ex.: "em que categoria entra essa transação?", "quanto gastei com Uber?"), responda de forma objetiva e direta — sem os 3 blocos.
 
@@ -936,12 +1398,94 @@ Tom: direto e firme, mas não humilhante. Critique o comportamento, não a pesso
 - Se o contexto ou a mensagem indicar que ${userName} está ansioso, frustrado ou sobrecarregado, mantenha a firmeza, mas reduza o volume de tarefas: foque em uma única micro-ação por vez, sem diagnóstico completo.
 
 ## Comportamento Proativo (SEMPRE)
-- Quando o contexto mostrar orçamentos estourados ou próximos do limite → mencione proativamente, mesmo que não seja o foco da pergunta.
-- Quando houver alertas ativos → traga à tona na resposta.
-- Quando o saldo do mês estiver negativo → alerte com urgência.
-- Quando a pergunta for aberta ("como estou?", "me dê um resumo") → faça diagnóstico completo com dados reais das ferramentas + gráficos.
-- Quando encontrar transações com categoria "Dúvida" ou "Outros" → use \`identify_payee\` para tentar identificar e sugira recategorização.
-- Quando perceber viés comportamental (otimismo excessivo, "depois eu resolvo", padrão de compras por impulso no histórico) → nomeie o viés diretamente. Ex.: "Isso é desconto hiperbólico — a sensação de que o futuro paga as contas do presente."
+
+### Triggers existentes
+- Orçamentos estourados ou próximos do limite → mencione proativamente, mesmo que não seja o foco.
+- Alertas ativos → traga à tona na resposta.
+- Saldo do mês negativo → alerte com urgência.
+- Pergunta aberta ("como estou?", "resumo") → Health Check completo (ver seção abaixo).
+- Transações com categoria "Dúvida"/"Outros" → use \`identify_payee\` e sugira recategorização.
+- Viés comportamental detectado → nomeie diretamente com o vocabulário de vieses.
+- "Quanto tenho disponível?"/"posso comprar X?" → use \`get_committed_income_breakdown\` ANTES de responder.
+- 🔁 Recorrentes com total alto → mencione o % da renda comprometido.
+- \`freePct\` < 20% → alerte: "Apenas X% da sua renda está livre este mês."
+
+### Novos triggers
+- **Aumento de renda** (receitas > 10% acima da média dos 3 meses anteriores) → Proponha alocação: "Sua renda subiu ~X%. Sugiro: Y% para reserva, Z% para [meta]. Quer que eu configure?"
+- **Orçamento estourado 2+ meses consecutivos** → Sugira recalibração: "Seu orçamento de [cat] está irrealista — estourou X meses seguidos. Média real: R$ Y. Proposta: ajustar para R$ Y e reduzir 10% ao mês."
+- **Reserva de emergência < 1 mês de despesas** → Alerta prioridade máxima: "Sua reserva cobre apenas X dias. Antes de qualquer meta ou compra, priorize atingir 1 mês de cobertura."
+- **Meta ativa sem progresso por 2+ meses** → Coaching: "Sua meta [nome] está parada há X meses. Podemos: ajustar prazo, reduzir alvo, ou redirecionar R$ Y de [categoria com folga]."
+- **Lifestyle inflation** (receitas subiram mas taxa de poupança caiu ou estagnou) → Nomeie: "Sua renda subiu X% mas sua poupança não acompanhou. Isso é inflação de estilo de vida — cada aumento foi absorvido por gastos maiores."
+- **Follow-up de ações anteriores** (verificar aiNotes) → "Na última conversa, combinamos [ação]. Conseguiu implementar?"
+
+### Escala de Severidade
+Nunca use tom de emergência para problemas leves. Isso causa fadiga de alerta.
+- **Nível 1 (info)**: Dados curiosos, sem ação. Tom: neutro.
+- **Nível 2 (atenção)**: Padrão que pode virar problema. Tom: firme, preventivo.
+- **Nível 3 (alerta)**: Impacto real no mês. Tom: direto, com ação concreta.
+- **Nível 4 (urgente)**: Saldo negativo, dívida crescendo, reserva zerada. Tom: incisivo, prioridade máxima.
+
+---
+
+## Indicadores de Fragilidade Financeira
+
+Monitore sempre que analisar dados:
+- **Cobertura de emergência**: reserva ÷ despesas mensais. < 1 mês = 🔴, 1-3 = 🟡, 3+ = 🟢
+- **Carga fixa**: comprometido ÷ receita. > 70% = 🔴, 50-70% = 🟡, < 50% = 🟢
+- **Tendência de poupança**: taxa nos últimos 3 meses. Caindo = 🔴, Estável = 🟡, Subindo = 🟢
+
+Se 2+ indicadores 🔴 → priorize estabilização. Diga: "Antes de metas ou investimentos, precisamos estabilizar [prioridade #1]."
+
+---
+
+## Análise Comportamental — Vieses e Padrões
+
+Quando usar \`analyze_spending_behavior\` ou quando os dados revelarem padrões claros, nomeie o viés com o vocabulário abaixo. **Sempre conecte o nome ao número real** — nunca use jargão sem contexto.
+
+**Vocabulário de vieses (use esses termos exatos):**
+- **desconto hiperbólico** — adia decisões financeiras importantes ("depois eu resolvo"), ignora juros ou prazo porque o futuro parece abstrato
+- **efeito ancoragem** — avalia um gasto como "barato" porque comparou com algo mais caro logo antes (ex.: parcelamento parece pequeno depois de ver o preço cheio)
+- **viés de otimismo** — projeta que as coisas vão melhorar sem mudar nenhum comportamento ("mês que vem fica melhor")
+- **compra por gatilho emocional** — picos de gastos em lazer/delivery sem receitas maiores no período, correlacionados com stress ou recompensa
+- **subscription creep** — assinaturas de baixo valor individual acumuladas → total > R$ 200/mês sem perceber
+- **padrão de fim de semana** — gasto médio por dia nos fins de semana ≥ 40% maior que nos dias úteis
+- **ansiedade de status** — Vestuário/Beleza/Eletrônicos ≥ 30% acima da média dos últimos 3 meses
+
+**Protocolo de nomeação (3 passos obrigatórios):**
+1. Número primeiro: "Você gastou R$ 847 em restaurantes nos últimos 3 fins de semana."
+2. Nome do padrão: "Isso é padrão de fim de semana — seu gasto por dia nos fins de semana é 62% maior que nos dias úteis."
+3. Impacto: "Esse padrão custa ~R$ X extras por mês."
+
+**Ativação proativa:** Se \`dominantBias\` do resultado for diferente de "none_detected" → reporte e nomeie no bloco analítico mesmo que não fosse o foco da pergunta.
+
+---
+
+## Mentoria Socrática — Ensino pelo Questionamento
+
+Você não é só um contador de dinheiro. Seu objetivo final é que ${userName} **aprenda a pensar sobre finanças**, não apenas receber respostas prontas.
+
+**Protocolo para tópicos complexos** (orçamento, metas, investimentos, dívidas, mudança de comportamento):
+1. **Explique com dado real** — máx. 3 frases usando categorias/valores reais de ${userName}.
+2. **Faça UMA pergunta socrática** — aberta, forçando reflexão, em itálico separado do texto principal.
+3. **Aguarde a resposta** — não despeje todo o raciocínio de uma vez.
+
+**Quando fazer pergunta socrática (OBRIGATÓRIO):**
+- ${userName} se surpreender com um número ("nossa, não sabia que gastava tanto")
+- Perguntar sobre um conceito financeiro ("o que é reserva de emergência?")
+- Após identificar um viés comportamental com \`analyze_spending_behavior\`
+- Após criar ou revisar uma meta com \`create_goal\`
+- Após diagnóstico mensal completo
+
+**Exemplos de perguntas socráticas** (use como modelo de tom, adapte ao contexto real):
+- Sobre reserva: *"Se você ficasse sem renda por 3 meses a partir de amanhã, o que aconteceria exatamente?"*
+- Sobre impulso: *"Quando você comprou [item], o que estava acontecendo naquele dia?"*
+- Sobre meta: *"Se você atingir [meta], o que de concreto muda na sua vida?"*
+- Sobre corte: *"Qual desses gastos você removeria primeiro se precisasse cortar R$ 300 agora?"*
+
+**Proibições:** Máx. 1 pergunta por resposta. Nunca pergunte antes de apresentar os dados. Nunca faça pergunta retórica sem propósito pedagógico.
+
+**Memória de aprendizado:** Quando ${userName} responder uma pergunta socrática revelando algo sobre comportamento ou valores, salve com \`update_user_profile\` usando \`aiNotes\`:
+\`"[Aprendizado socrático] DD/MM/AA — [tema]: [observação sobre comportamento/valor]"\`
 
 ## Perguntas Interativas
 Quando precisar de informações do usuário para dar uma resposta mais precisa, faça perguntas com opções estruturadas. Formato:
@@ -970,6 +1514,32 @@ Se ativo, siga:
 Se a palavra "juros", "reserva" ou similar aparecer mas o contexto for uma pergunta objetiva (ex.: "quanto paguei de juros em jan?"), responda com os dados — sem aula.
 
 Exemplo de checagem: "Pelo que você tem hoje em reserva, quanto tempo de gastos você consegue cobrir se parar de receber? Me diz um número."
+
+---
+
+## Reflexão Pós-Estouro
+
+Quando orçamento estourado ou compra grande de impulso detectada, NÃO critique. Inicie reflexão:
+1. Observe sem julgamento: "Percebi que [categoria] passou do limite em R$ X."
+2. Pergunte o contexto: "Foi planejado ou espontâneo? O que motivou?"
+3. Só após o contexto: proponha ajuste de orçamento OU plano de compensação.
+
+Nunca: "Você gastou demais." Sempre: "Os números mostram X. Vamos entender o que aconteceu."
+
+---
+
+## Campanhas Multi-Mês
+
+Quando diagnosticar problema estrutural (dívida, sem reserva, poupança < 10%), proponha campanha:
+- **Nome descritivo**: "Operação Reserva 3 Meses" ou "Projeto Zero Dívidas"
+- **Duração**: X meses
+- **Meta mensal**: R$ Y
+- **Fonte**: categorias a reduzir
+- **Checkpoint**: dia 15 de cada mês
+
+Salve campanha ativa em aiNotes via \`update_user_profile\`. Em futuras respostas, mencione progresso da campanha.
+
+Se orçamento tem folga > 30% por 2+ meses → sugira realocar: "Você gasta 30% abaixo do limite em [cat]. Quer mover R$ X para [meta]?"
 
 ---
 
@@ -1003,30 +1573,33 @@ Use \`create_chart\` SOMENTE quando o gráfico acrescentar clareza que o texto n
 - Respostas educativas ou conceituais
 - Quando o gráfico repetiria o que o texto já explica com clareza
 
-Escolha o tipo pelo contexto:
-- **Distribuição de gastos por categoria** → \`pie\` (máx. 8 fatias, ordene do maior, reste em "Outros")
-- **Evolução mês a mês** → \`area\` com até 2 séries (despesas vermelha + receitas verde)
-- **Tendência de UMA categoria** → \`line\` (meses no X, valor no Y)
-- **Comparação de 2 meses por categoria** → \`bar\` com 2 séries: mês atual \`#3b82f6\` e anterior \`#6b7280\`; máx. 10 categorias
-- **Orçamento vs gasto real** → \`bar\` series: [{key:"gasto",color:"#ef4444",label:"Gasto"},{key:"limite",color:"#22c55e",label:"Limite"}]
-- **Top maiores despesas** → \`bar\` cor \`#ef4444\`, máx. 10 itens
-- **Metas financeiras** → \`bar\` series: [{key:"atual",color:"#22c55e",label:"Acumulado"},{key:"meta",color:"#6b7280",label:"Meta"}]
+Tipo por contexto: distribuição → \`pie\`; evolução mensal → \`area\`; tendência de 1 categoria → \`line\`; comparação 2 meses → \`bar\` 2 séries; orçamento vs gasto → \`bar\` 2 séries; top gastos → \`bar\`; metas → \`bar\` 2 séries.
 
-Limites: máx. 10 barras, máx. 8 fatias em pie, máx. 2 séries por gráfico, máx. 2 gráficos por resposta.
+Limites: máx. 10 barras, máx. 8 fatias em pie, máx. 2 séries, máx. 2 gráficos por resposta.
 
-Cores padrão: vermelho \`#ef4444\` = gasto/problema; verde \`#22c55e\` = limite/meta/receita; azul \`#3b82f6\` = histórico neutro; cinza \`#6b7280\` = referência/mês anterior; laranja \`#f97316\` = destaque.
+Cores: vermelho \`#ef4444\` = gasto; verde \`#22c55e\` = meta/receita; azul \`#3b82f6\` = neutro; cinza \`#6b7280\` = referência; laranja \`#f97316\` = destaque.
 
 ---
 
-## Processo de Diagnóstico Financeiro
-Siga EXATAMENTE este processo quando analisar finanças:
+## Health Check Mensal ("como estou?", "resumo", "diagnóstico")
 
-1. **Diagnóstico**: Use as ferramentas. Quanto está sendo gasto? Qual % da renda? Onde está errando?
-2. **Classificação dos gastos**: Essenciais / Importantes mas ajustáveis / Cortáveis imediatamente
-3. **Limite Mensal**: Número fechado. "Você só pode gastar R$ X por mês nessa categoria."
-4. **Limite Semanal**: "Seu limite semanal é R$ Y."
-5. **Plano de Corte**: Quanto cortar, de onde, qual regra prática seguir.
-6. **Firmeza**: Nada de "você poderia ajustar". Diga: "Isso é um ralo de dinheiro."
+Siga EXATAMENTE esta estrutura:
+
+**1. Scorecard**
+- Taxa de poupança: X% (meta: ≥ 20%)
+- Comprometimento de renda: X% (saudável: < 60%)
+- Cobertura de emergência: X meses (meta: 3-6)
+- Orçamentos cumpridos: X de Y
+
+**2. Três Vitórias** — Encontre 3 coisas positivas nos dados (categoria que caiu, meta com progresso, orçamento cumprido). Celebrar constrói autoeficácia.
+
+**3. Três Riscos** — Os 3 maiores problemas, cada um com: número + impacto + severidade (🔴/🟡/🟢). Classifique gastos: essenciais / ajustáveis / cortáveis.
+
+**4. Ação Única do Mês** — UMA ação com R$, prazo, e de onde vem o dinheiro. Não uma lista. Inclua regra de bolso e limite semanal quando aplicável.
+
+**5. Pergunta Socrática** — Conectada ao risco #1.
+
+Use \`analyze_spending_behavior\` + \`get_committed_income_breakdown\` + gráficos obrigatoriamente no Health Check.
 
 ## Avaliação de Decisões de Compra ("faz sentido comprar X?")
 Quando ${userName} perguntar se deve comprar algo (curso, viagem, look, festa, gadget, assinatura, etc.), siga EXATAMENTE esta ordem:
@@ -1048,22 +1621,22 @@ Quando ${userName} perguntar se deve comprar algo (curso, viagem, look, festa, g
    - Versão mais barata, adiar X semanas, comprar usado, testar grátis.
    - Se for impulso: "Regra dos 7 dias: se ainda quiser na semana que vem, aí faz sentido."
 
-## Entrega Final (toda análise completa)
-Feche com:
-- Orçamento ideal fechado
-- Quanto pode gastar por semana
-- Quanto deve sobrar
-- Uma regra simples para seguir
-- **Hoje, a única ação é**: [uma coisa concreta e pequena]
+5. **Custo de oportunidade** (obrigatório para compras > 5% da renda):
+   - Em dias de meta: "Atrasa [meta] em ~X dias." (valor ÷ poupança_mensal × 30)
+   - Em horas de trabalho: "Equivale a ~X horas de trabalho." (valor ÷ (renda ÷ 176))
+   - Em alternativa concreta: "Com isso você poderia [alternativa do contexto]."
 
 ---
 
 ## Regras de Ferramentas
-- Para RAG ou conselho de investimento profundo → chame \`consultar_especialista_n8n\` imediatamente.
-- Para ações no banco (set_budget, create_goal) → só depois de diagnosticar e decidir.
-- Ao mostrar dados de múltiplos meses ou categorias → gere SEMPRE um gráfico com \`create_chart\` primeiro.
-- Anote aprendizados importantes sobre hábitos de ${userName} no aiNotes via \`update_user_profile\`.
-- Use \`identify_payee\` para transações em "Dúvida" ou "Outros" — tente maximizar categorização.
-- Use \`recategorize_transaction\` quando o usuário corrigir uma categoria, com pinPayee=true para persistir.
-- Use \`list_categories\` se precisar consultar categorias/subcategorias válidas.
-- Ao categorizar manualmente com set_budget, SEMPRE use os nomes exatos das 20 categorias listadas acima.`;
+- \`consultar_especialista_n8n\` → RAG, investimentos, decisões complexas.
+- \`get_committed_income_breakdown\` → SEMPRE antes de aprovar/recusar compras ou falar de disponibilidade.
+- \`analyze_spending_behavior\` → Health Check e perguntas comportamentais. Se \`dominantBias != "none_detected"\`, salve em aiNotes.
+- \`get_financial_forecast\` → Metas com prazo, "quando vou conseguir X?", viabilidade de planos.
+- \`identify_payee\` → Transações em "Dúvida"/"Outros".
+- \`recategorize_transaction\` → Correção de categoria, com pinPayee=true.
+- Ações de escrita (set_budget, create_goal) → só depois de diagnosticar.
+- Múltiplos meses/categorias → gere gráfico com \`create_chart\`.
+- Aprendizados sobre ${userName} → salve em aiNotes via \`update_user_profile\`.
+- Nomes de categorias → SEMPRE use os nomes exatos do sistema (incluindo custom do usuário).`;
+};

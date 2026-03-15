@@ -127,10 +127,13 @@ export async function GET(req: NextRequest) {
 
         // ── Libre para Gastar (freeToSpend) ───────────────────────────────────
         // Step 1: recurring beneficiaries — those that appeared in last 3 months
+        // Include stddev to distinguish true subscriptions (consistent amount) from variable charges
         const recurringQuery = await db
             .select({
                 beneficiary: transactions.beneficiary,
+                category: sql<string>`MAX(${transactions.category})`,
                 avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
+                stddevAmount: sql<number>`COALESCE(ROUND(STDDEV_POP(${transactions.amount}::numeric), 2), 0)`,
                 monthCount: sql<number>`COUNT(DISTINCT ${transactions.month})`,
             })
             .from(transactions)
@@ -144,6 +147,105 @@ export async function GET(req: NextRequest) {
 
         const recurringBeneficiaries = new Set(recurringQuery.map(r => r.beneficiary));
         const estimatedRecurring = recurringQuery.reduce((s, r) => s + Number(r.avgAmount), 0);
+
+        // ── Detect installment patterns — scan ALL expenses, decoupled from recurringQuery ──
+        // Don't stop at first row per beneficiary — keep scanning until we find an X/Y pattern
+        const installmentMap: Record<string, { current: number; total: number; monthsRemaining: number; paidCount: number; amount: number; category: string }> = {};
+        const completedInstallments = new Set<string>(); // Series fully paid — exclude from autoItems
+
+        const allDescRows = await db.execute(sql`
+            SELECT beneficiary, description, month, amount, category
+            FROM ff_transactions
+            WHERE user_id = ${userId}
+                AND type = 'despesa'
+            ORDER BY beneficiary, date DESC
+        `);
+
+        const selectedMonthNum = monthToNum(month);
+
+        for (const row of (allDescRows.rows as Array<{ beneficiary: string; description: string | null; month: string; amount: string; category: string | null }>)) {
+            // Already resolved this beneficiary
+            if (row.beneficiary in installmentMap || completedInstallments.has(row.beneficiary)) continue;
+            // Skip future months
+            if (monthToNum(row.month) > selectedMonthNum) continue;
+
+            if (!row.description) continue;
+            const match = row.description.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+            if (match) {
+                const paidCurrent = parseInt(match[1]);
+                const total = parseInt(match[2]);
+                if (paidCurrent >= 1 && paidCurrent <= total && total >= 2 && total <= 36) {
+                    const nextInstallment = paidCurrent + 1;
+                    if (nextInstallment <= total) {
+                        installmentMap[row.beneficiary] = {
+                            current: nextInstallment,
+                            total,
+                            monthsRemaining: total - nextInstallment,
+                            paidCount: paidCurrent,
+                            amount: Math.abs(Number(row.amount)),
+                            category: row.category ?? "Outros",
+                        };
+                    } else {
+                        // Series complete — don't show in either section
+                        completedInstallments.add(row.beneficiary);
+                    }
+                }
+            }
+        }
+
+        // Shape recurring items:
+        // - Skip beneficiaries with completed installments (not a true subscription)
+        // - Skip beneficiaries with high amount variance (not a consistent charge)
+        const recurringItemsList: Array<{ beneficiary: string; category: string; avgAmount: number; monthCount: number; installment: { current: number; total: number; monthsRemaining: number; paidCount: number } | null }> = [];
+
+        for (const r of recurringQuery) {
+            // Completed installments don't belong in cobranças automáticas
+            if (completedInstallments.has(r.beneficiary)) continue;
+
+            const avg = Number(r.avgAmount);
+            const stddev = Number(r.stddevAmount);
+            const inst = installmentMap[r.beneficiary];
+
+            if (inst) {
+                // Has active installment → show as parcela
+                recurringItemsList.push({
+                    beneficiary: r.beneficiary,
+                    category: r.category ?? "Outros",
+                    avgAmount: avg,
+                    monthCount: Number(r.monthCount),
+                    installment: { current: inst.current, total: inst.total, monthsRemaining: inst.monthsRemaining, paidCount: inst.paidCount },
+                });
+            } else {
+                // No installment pattern — only show if amount is consistent (CV < 15%)
+                const cv = avg > 0 ? stddev / avg : 0;
+                if (cv < 0.15) {
+                    recurringItemsList.push({
+                        beneficiary: r.beneficiary,
+                        category: r.category ?? "Outros",
+                        avgAmount: avg,
+                        monthCount: Number(r.monthCount),
+                        installment: null,
+                    });
+                }
+            }
+        }
+
+        // Add non-recurring beneficiaries that have active installment patterns
+        const recurringBenSet = new Set(recurringQuery.map(r => r.beneficiary));
+        for (const [ben, inst] of Object.entries(installmentMap)) {
+            if (!recurringBenSet.has(ben)) {
+                recurringItemsList.push({
+                    beneficiary: ben,
+                    category: inst.category,
+                    avgAmount: inst.amount,
+                    monthCount: 1,
+                    installment: { current: inst.current, total: inst.total, monthsRemaining: inst.monthsRemaining, paidCount: inst.paidCount },
+                });
+            }
+        }
+
+        recurringItemsList.sort((a, b) => b.avgAmount - a.avgAmount);
+        const recurringItems = recurringItemsList.slice(0, 15);
 
         // Step 2: goal monthly contributions
         const now = new Date();
@@ -178,6 +280,24 @@ export async function GET(req: NextRequest) {
             .reduce((s, r) => s + Number(r.total), 0);
 
         const freeToSpend = Math.round((receitas - estimatedRecurring - goalContributions - variableSpent) * 100) / 100;
+
+        // ── Committed Income Breakdown ─────────────────────────────────────────
+        const committedTotal = estimatedRecurring + goalContributions;
+        const committedPct = receitas > 0 ? Math.round((committedTotal / receitas) * 100) : 0;
+        const variablePct = receitas > 0 ? Math.round((variableSpent / receitas) * 100) : 0;
+        const freePct = Math.max(0, 100 - committedPct - variablePct);
+        const committedBreakdown = {
+            committedAmount: Math.round(committedTotal * 100) / 100,
+            committedPct,
+            variableAmount: Math.round(variableSpent * 100) / 100,
+            variablePct,
+            freeAmount: Math.round(freeToSpend * 100) / 100,
+            freePct,
+            commitmentLevel: committedPct > 80 ? "critical" as const
+                : committedPct > 60 ? "high" as const
+                : committedPct > 40 ? "moderate" as const
+                : "healthy" as const,
+        };
 
         // ── Burn Rate ─────────────────────────────────────────────────────────
         const { year: mYear, monthIdx: mMonthIdx } = parseMonth(month);
@@ -371,6 +491,8 @@ export async function GET(req: NextRequest) {
             burnRate: { dailyRate, projectedMonthTotal, daysElapsed, daysInMonth: totalDays, projectedRunOutDay },
             aiSummary: aiSummaryContent,
             nearestGoal: nearestActiveGoal,
+            recurringItems,
+            committedBreakdown,
         });
     } catch (err) {
         console.error("Dashboard summary error:", err);

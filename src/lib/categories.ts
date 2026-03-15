@@ -1,15 +1,27 @@
 /**
  * Finance Friend — Sistema de Categorias (Fonte Única de Verdade)
  *
- * 20 categorias com subcategorias detalhadas, cores e funções de validação.
+ * 20 categorias default + categorias customizadas por usuário.
+ * Defaults vivem no código, custom no DB. Merge em runtime via getMergedTaxonomy().
+ *
+ * IMPORTANTE: Este arquivo NÃO importa nada do DB/server — é seguro para client components.
+ * As funções que precisam do DB estão em categories-server.ts.
  */
 
-// ─── Taxonomia Completa ──────────────────────────────────────────────────────
+// ─── Tipos ──────────────────────────────────────────────────────────────────
 
 export interface CategoryInfo {
   subcategories: string[];
   color: { bg: string; text: string; dot: string };
   type: "despesa" | "receita" | "ambos";
+}
+
+export interface MergedCategoryInfo extends CategoryInfo {
+  icon: string;
+  aiContext?: string;
+  aiExamples?: string[];
+  isCustom: boolean;
+  id?: string;
 }
 
 export const CATEGORY_TAXONOMY: Record<string, CategoryInfo> = {
@@ -352,3 +364,33 @@ export const CHART_COLORS = [
   "#6366F1", "#78716C", "#DC2626", "#22C55E", "#14B8A6",
   "#A855F7", "#00A67E", "#818CF8", "#4D5260", "#FBBF24",
 ];
+
+// ─── Helpers Dinâmicos (aceitam taxonomy merged — client-safe) ────────────────
+
+export function getAllCategoriesFrom(taxonomy: Record<string, MergedCategoryInfo>): string[] {
+  return Object.keys(taxonomy);
+}
+
+export function getExpenseCategoriesFrom(taxonomy: Record<string, MergedCategoryInfo>): string[] {
+  return Object.keys(taxonomy).filter(
+    (c) => taxonomy[c].type === "despesa" || taxonomy[c].type === "ambos"
+  );
+}
+
+export function getIncomeCategoriesFrom(taxonomy: Record<string, MergedCategoryInfo>): string[] {
+  return Object.keys(taxonomy).filter(
+    (c) => taxonomy[c].type === "receita" || taxonomy[c].type === "ambos"
+  );
+}
+
+export function isValidCategoryIn(category: string, taxonomy: Record<string, MergedCategoryInfo | CategoryInfo>): boolean {
+  return category in taxonomy;
+}
+
+export function getCategoryColorFrom(category: string, taxonomy: Record<string, MergedCategoryInfo | CategoryInfo>) {
+  return taxonomy[category]?.color || CATEGORY_TAXONOMY["Outros"].color;
+}
+
+export function getSubcategoriesFrom(category: string, taxonomy: Record<string, MergedCategoryInfo | CategoryInfo>): string[] {
+  return taxonomy[category]?.subcategories || [];
+}

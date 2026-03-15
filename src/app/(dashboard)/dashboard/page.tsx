@@ -7,6 +7,7 @@ import { RadarCard } from "@/components/dashboard/radar-card";
 import { MonthSelector } from "@/components/transactions/month-selector";
 import { InlineChart } from "@/components/charts/inline-chart";
 import { getCurrentMonth, formatBRL } from "@/lib/utils";
+import { CommittedBreakdown } from "@/components/dashboard/committed-breakdown";
 import Link from "next/link";
 import { Sparkles, Scale, ArrowDownCircle, ArrowUpCircle, Target, Percent } from "lucide-react";
 
@@ -41,6 +42,16 @@ interface DashboardData {
     burnRate: { dailyRate: number; projectedMonthTotal: number; daysElapsed: number; daysInMonth: number; projectedRunOutDay: number | null };
     aiSummary: string | null;
     nearestGoal: GoalData | null;
+    recurringItems: Array<{ beneficiary: string; category: string; avgAmount: number; monthCount: number; installment: { current: number; total: number; monthsRemaining: number; paidCount?: number } | null }>;
+    committedBreakdown: {
+        committedAmount: number;
+        committedPct: number;
+        variableAmount: number;
+        variablePct: number;
+        freeAmount: number;
+        freePct: number;
+        commitmentLevel: "critical" | "high" | "moderate" | "healthy";
+    } | null;
 }
 
 export default function DashboardPage() {
@@ -77,7 +88,7 @@ export default function DashboardPage() {
     return (
         <div>
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                 <div>
                     <h1 className="text-h1" style={{ color: "var(--text-primary)" }}>Dashboard</h1>
                     <p className="text-body mt-1" style={{ color: "var(--text-secondary)" }}>
@@ -88,8 +99,21 @@ export default function DashboardPage() {
             </div>
 
             {loading ? (
-                <div className="flex items-center justify-center h-[400px]">
-                    <span className="text-body" style={{ color: "var(--text-muted)" }}>Carregando...</span>
+                <div className="space-y-6">
+                    {/* Shimmer KPIs */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {[...Array(4)].map((_, i) => (
+                            <div key={i} className="rounded-[6px] border p-4 h-[90px] animate-shimmer" style={{ borderColor: "var(--border)" }} />
+                        ))}
+                    </div>
+                    {/* Shimmer insights */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {[...Array(3)].map((_, i) => (
+                            <div key={i} className="rounded-[6px] border p-4 h-[80px] animate-shimmer" style={{ borderColor: "var(--border)" }} />
+                        ))}
+                    </div>
+                    {/* Shimmer chart */}
+                    <div className="rounded-[6px] border h-[200px] animate-shimmer" style={{ borderColor: "var(--border)" }} />
                 </div>
             ) : error || !data ? (
                 <div className="flex flex-col items-center justify-center h-[400px] gap-3">
@@ -105,7 +129,7 @@ export default function DashboardPage() {
                     {/* ── Seção 1: AI Summary Banner ──────────────────────────────── */}
                     {data.aiSummary && (
                         <div
-                            className="flex items-start gap-3 px-5 py-4 mb-6 rounded-[8px]"
+                            className="animate-fade-up stagger-1 flex items-start gap-3 px-5 py-4 mb-6 rounded-[8px]"
                             style={{
                                 background: "rgba(17,18,21,0.8)",
                                 backdropFilter: "blur(12px)",
@@ -121,7 +145,7 @@ export default function DashboardPage() {
                     )}
 
                     {/* ── Seção 2: KPI Cards ──────────────────────────────────────── */}
-                    <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="animate-fade-up stagger-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                         {/* Card 1: Saldo do Mês */}
                         <KpiCard
                             title="Saldo do Mês"
@@ -192,8 +216,19 @@ export default function DashboardPage() {
                         )}
                     </div>
 
+                    {/* ── Seção 2.5: Renda Comprometida ───────────────────────────── */}
+                    {data.committedBreakdown && (
+                        <div className="animate-fade-up stagger-3 mb-6">
+                            <CommittedBreakdown
+                                breakdown={data.committedBreakdown}
+                                recurringItems={data.recurringItems ?? []}
+                                receitas={data.summary.receitas}
+                            />
+                        </div>
+                    )}
+
                     {/* ── Seção 3: Destaques do Mês ───────────────────────────────── */}
-                    <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="animate-fade-up stagger-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
                         {(data.insights ?? []).map((insight, i) => (
                             <RadarCard
                                 key={i}
@@ -206,8 +241,8 @@ export default function DashboardPage() {
                     </div>
 
                     {/* ── Seção 4: Charts ─────────────────────────────────────────── */}
-                    <div className="grid grid-cols-5 gap-4 mb-6">
-                        <div className="col-span-3">
+                    <div className="animate-fade-up stagger-4 grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+                        <div className="lg:col-span-3">
                             <InlineChart
                                 areaWarning={areaWarning}
                                 spec={{
@@ -228,7 +263,7 @@ export default function DashboardPage() {
                                 }}
                             />
                         </div>
-                        <div className="col-span-2">
+                        <div className="lg:col-span-2">
                             <InlineChart
                                 monoDonut={true}
                                 spec={{
@@ -246,7 +281,7 @@ export default function DashboardPage() {
                     </div>
 
                     {/* ── Seção 5: Orçamentos (thin bars) ────────────────────────── */}
-                    <div className="rounded-[6px] border p-4" style={{ borderColor: "var(--border)" }}>
+                    <div className="animate-fade-up stagger-5 rounded-[6px] border p-4" style={{ borderColor: "var(--border)" }}>
                         <div className="flex items-center justify-between mb-3">
                             <h3 className="text-h3" style={{ color: "var(--text-primary)" }}>Orçamentos do Mês</h3>
                             <Link

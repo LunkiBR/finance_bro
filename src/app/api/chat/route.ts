@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         // Fetch user info for personalization
         const profileInfo = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
         const userName = profileInfo[0]?.nome || "usuário";
-        const systemPrompt = getSystemPrompt(userName);
+        const systemPrompt = await getSystemPrompt(userName, userId);
 
         // Build context snapshot (live financial state)
         const contextSnapshot = await buildContextSnapshot(userId);

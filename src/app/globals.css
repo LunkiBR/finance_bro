@@ -201,3 +201,69 @@ body {
 .animate-progress {
   animation: progress-fill 0.8s ease-out forwards;
 }
+
+/* ─── App Animations ───────────────────────────────────────────────────────── */
+
+/* Page transition — route change */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-page-enter {
+  animation: page-enter 0.22s ease-out forwards;
+}
+
+/* Fade-in — overlays, badges */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out forwards;
+}
+
+/* Sheet slide-up — mobile drawers */
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-sheet-up {
+  animation: sheet-up 0.2s ease-out forwards;
+}
+
+/* Scale-in — modals/dialogs */
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.animate-scale-in {
+  animation: scale-in 0.18s ease-out forwards;
+}
+
+/* Shimmer — loading skeletons */
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 25%,
+    var(--bg-surface)  50%,
+    var(--bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* Stagger delays — use with animate-fade-up */
+.stagger-1 { animation-delay: 40ms; }
+.stagger-2 { animation-delay: 80ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 160ms; }
+.stagger-5 { animation-delay: 200ms; }
+
+/* Ensure elements start hidden before stagger kicks in */
+.stagger-1, .stagger-2, .stagger-3, .stagger-4, .stagger-5 {
+  opacity: 0;
+}

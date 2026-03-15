@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { MonthSelector } from "@/components/transactions/month-selector";
 import { CategoryBadge, CategoryPicker } from "@/components/transactions/category-badge";
-import { ALL_CATEGORIES } from "@/lib/category-colors";
+import { ALL_CATEGORIES, getCategoryColor } from "@/lib/category-colors";
+import { getCategoryIcon } from "@/lib/category-icons";
 import { getCurrentMonth, formatBRL } from "@/lib/utils";
 import { RuleToast, type RuleToastData } from "@/components/transactions/rule-toast";
-import { Search, SlidersHorizontal, Download, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Search, SlidersHorizontal, Download, ArrowUpDown, ArrowUp, ArrowDown, ShoppingBag, ArrowDownLeft } from "lucide-react";
 
 interface Transaction {
     id: string;
@@ -61,7 +62,9 @@ export default function TransacoesPage() {
     const [endDate, setEndDate] = useState("");
     const filterRef = useRef<HTMLDivElement>(null);
 
-    const activeFilterCount = [minAmount, maxAmount, startDate, endDate].filter(Boolean).length;
+    const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
+
+    const activeFilterCount = [minAmount, maxAmount, startDate, endDate, category, type].filter(Boolean).length;
 
     // Close filter popover on outside click
     useEffect(() => {
@@ -285,11 +288,29 @@ export default function TransacoesPage() {
         setPage(1);
     }
 
+    // Helper for date grouping in mobile
+    function formatRelativeDate(dateString: string) {
+        // Adjust date string to standard format if needed. Let's assume dateString is YYYY-MM-DD
+        const d = new Date(dateString);
+        
+        // Use local timezone offsets to compare "Today" and "Yesterday"
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        if (d.toDateString() === today.toDateString()) return "Hoje";
+        if (d.toDateString() === yesterday.toDateString()) return "Ontem";
+        
+        return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
+    }
+
     function clearFilters() {
         setMinAmount("");
         setMaxAmount("");
         setStartDate("");
         setEndDate("");
+        setCategory("");
+        setType("");
         setMonth(getCurrentMonth());
         setPage(1);
     }
@@ -307,14 +328,22 @@ export default function TransacoesPage() {
             <div className="flex items-center justify-between mb-4">
                 <h1 className="text-h1" style={{ color: "var(--text-primary)" }}>Transações</h1>
                 <div className="flex items-center gap-2">
+                    {/* Mobile Export */}
                     <button
                         onClick={exportCSV}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] border text-[13px] transition-colors"
+                        className="md:hidden p-2 rounded-full hover:bg-[var(--bg-elevated)] transition-colors text-[var(--text-secondary)]"
+                        title="Exportar CSV"
+                    >
+                        <Download size={18} />
+                    </button>
+                    {/* Desktop Export */}
+                    <button
+                        onClick={exportCSV}
+                        className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] border text-[13px] transition-colors"
                         style={{ borderColor: "var(--border)", color: "var(--text-secondary)", background: "transparent" }}
                         title="Exportar CSV"
                     >
-                        <Download size={13} />
-                        Exportar
+                        <Download size={13} /> Exportar
                     </button>
                     <MonthSelector
                         month={month}
@@ -324,9 +353,9 @@ export default function TransacoesPage() {
             </div>
 
             {/* ─── Filters row ─────────────────────────────────────────────────── */}
-            <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <div className="flex items-center gap-3 mb-4">
                 {/* Search */}
-                <div className="relative flex-1 min-w-[180px] max-w-[280px]">
+                <div className="relative flex-1 min-w-[150px] md:max-w-[280px]">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
                     <input
                         type="text"
@@ -338,54 +367,55 @@ export default function TransacoesPage() {
                     />
                 </div>
 
-                {/* Category */}
-                <select
-                    value={category}
-                    onChange={(e) => { setCategory(e.target.value); setPage(1); }}
-                    className="px-3 py-2 rounded-[6px] border text-[13px]"
-                    style={{ background: "var(--bg-elevated)", borderColor: "var(--border)", color: "var(--text-secondary)" }}
-                >
-                    <option value="">Categoria</option>
-                    {ALL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                {/* Categories & Type - Hidden on Mobile to save space, moved to Filters logic */}
+                <div className="hidden md:flex items-center gap-3">
+                    <select
+                        value={category}
+                        onChange={(e) => { setCategory(e.target.value); setPage(1); }}
+                        className="px-3 py-2 rounded-[6px] border text-[13px]"
+                        style={{ background: "var(--bg-elevated)", borderColor: "var(--border)", color: "var(--text-secondary)" }}
+                    >
+                        <option value="">Categoria</option>
+                        {ALL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
 
-                {/* Type toggle */}
-                <div className="flex rounded-[6px] border overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                    {[
-                        { value: "", label: "Todas" },
-                        { value: "receita", label: "Receitas" },
-                        { value: "despesa", label: "Despesas" },
-                    ].map((opt) => (
-                        <button
-                            key={opt.value}
-                            onClick={() => { setType(opt.value); setPage(1); }}
-                            className="px-3 py-2 text-[13px] transition-colors"
-                            style={{
-                                background: type === opt.value ? "var(--bg-elevated)" : "transparent",
-                                color: type === opt.value ? "var(--text-primary)" : "var(--text-secondary)",
-                            }}
-                        >
-                            {opt.label}
-                        </button>
-                    ))}
+                    <div className="flex rounded-[6px] border overflow-hidden" style={{ borderColor: "var(--border)" }}>
+                        {[
+                            { value: "", label: "Todas" },
+                            { value: "receita", label: "Receitas" },
+                            { value: "despesa", label: "Despesas" },
+                        ].map((opt) => (
+                            <button
+                                key={opt.value}
+                                onClick={() => { setType(opt.value); setPage(1); }}
+                                className="px-3 py-2 text-[13px] transition-colors"
+                                style={{
+                                    background: type === opt.value ? "var(--bg-elevated)" : "transparent",
+                                    color: type === opt.value ? "var(--text-primary)" : "var(--text-secondary)",
+                                }}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Advanced filters */}
                 <div className="relative" ref={filterRef}>
                     <button
                         onClick={() => setShowFilters(!showFilters)}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-[6px] border text-[13px] transition-colors"
+                        className="flex items-center gap-1.5 p-2 md:px-3 md:py-2 rounded-full md:rounded-[6px] border border-transparent md:border-[var(--border)] text-[13px] transition-colors"
                         style={{
-                            borderColor: activeFilterCount > 0 ? "#5B8FD4" : "var(--border)",
+                            borderColor: activeFilterCount > 0 ? "#5B8FD4" : undefined,
                             color: activeFilterCount > 0 ? "#5B8FD4" : "var(--text-secondary)",
-                            background: showFilters ? "var(--bg-surface)" : "transparent",
+                            background: showFilters ? "var(--bg-surface)" : "var(--bg-elevated)",
                         }}
                     >
-                        <SlidersHorizontal size={13} />
-                        Filtros
+                        <SlidersHorizontal size={18} className="md:w-[13px] md:h-[13px]" />
+                        <span className="hidden md:inline">Filtros</span>
                         {activeFilterCount > 0 && (
                             <span
-                                className="flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold"
+                                className="absolute -top-1 -right-1 md:static flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold"
                                 style={{ background: "#5B8FD4", color: "#fff" }}
                             >
                                 {activeFilterCount}
@@ -395,9 +425,37 @@ export default function TransacoesPage() {
 
                     {showFilters && (
                         <div
-                            className="absolute top-full left-0 mt-2 z-50 rounded-[8px] border p-4 shadow-xl"
+                            className="absolute top-full right-0 mt-2 z-50 rounded-[8px] border p-4 shadow-xl"
                             style={{ background: "var(--bg-elevated)", borderColor: "var(--border)", width: 296 }}
                         >
+                            {/* Mobile only elements inside filter */}
+                            <div className="md:hidden flex flex-col gap-3 mb-4 pb-4" style={{ borderBottom: "1px solid var(--border)" }}>
+                                <select
+                                    value={category}
+                                    onChange={(e) => { setCategory(e.target.value); setPage(1); }}
+                                    className="w-full px-3 py-2 rounded-[6px] border text-[13px]"
+                                    style={{ background: "var(--bg-surface)", borderColor: "var(--border)", color: "var(--text-secondary)" }}
+                                >
+                                    <option value="">Todas as Categorias</option>
+                                    {ALL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <div className="flex rounded-[6px] border overflow-hidden w-full" style={{ borderColor: "var(--border)" }}>
+                                    {[ { value: "", label: "Todas" }, { value: "receita", label: "Receitas" }, { value: "despesa", label: "Despesas" }].map((opt) => (
+                                        <button
+                                            key={opt.value}
+                                            onClick={() => { setType(opt.value); setPage(1); }}
+                                            className="flex-1 px-3 py-2 text-[13px] transition-colors"
+                                            style={{
+                                                background: type === opt.value ? "var(--bg-surface)" : "transparent",
+                                                color: type === opt.value ? "var(--text-primary)" : "var(--text-secondary)",
+                                            }}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            
                             {/* Period presets */}
                             <p className="text-[10px] font-semibold tracking-wide mb-2" style={{ color: "var(--text-muted)" }}>PERÍODO</p>
                             <div className="flex gap-1.5 mb-3">
@@ -524,18 +582,42 @@ export default function TransacoesPage() {
                         </button>
                     </div>
                 ) : (
+                    <>
+                    {/* Desktop Summary Strip */}
                     <div
-                        className="flex items-center gap-4 px-4 py-2 mb-4 text-[13px] rounded-[6px]"
+                        className="hidden md:flex items-center gap-4 px-4 py-2 mb-4 text-[13px] rounded-[6px]"
                         style={{ background: "var(--bg-surface)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}
                     >
-                        <span>Receitas: <strong style={{ color: "var(--accent-green)" }}>R$ {formatBRL(data.summary.receitas)}</strong></span>
+                        <span>Receitas: <strong style={{ color: "var(--accent-green)" }}>R$&nbsp;{formatBRL(data.summary.receitas)}</strong></span>
                         <span>·</span>
-                        <span>Despesas: <strong style={{ color: "var(--accent-red)" }}>R$ {formatBRL(data.summary.despesas)}</strong></span>
+                        <span>Despesas: <strong style={{ color: "var(--accent-red)" }}>R$&nbsp;{formatBRL(data.summary.despesas)}</strong></span>
                         <span>·</span>
-                        <span>Saldo: <strong style={{ color: "var(--text-primary)" }}>R$ {formatBRL(data.summary.saldo)}</strong></span>
+                        <span>Saldo: <strong style={{ color: "var(--text-primary)" }}>R$&nbsp;{formatBRL(data.summary.saldo)}</strong></span>
                         <span>·</span>
                         <span>{data.summary.count} transações</span>
                     </div>
+                    {/* Mobile Summary Cards */}
+                    <div className="md:hidden grid grid-cols-3 gap-2 mb-4">
+                        <div className="p-3 rounded-[12px] border flex flex-col items-center justify-center text-center transition-colors" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
+                            <span className="text-[10px] sm:text-[11px] uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>Receitas</span>
+                            <span className="text-[12px] sm:text-[13px] font-semibold" style={{ color: "var(--accent-green)" }}>
+                                R$&nbsp;{formatBRL(data.summary.receitas)}
+                            </span>
+                        </div>
+                        <div className="p-3 rounded-[12px] border flex flex-col items-center justify-center text-center transition-colors" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
+                            <span className="text-[10px] sm:text-[11px] uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>Despesas</span>
+                            <span className="text-[12px] sm:text-[13px] font-semibold" style={{ color: "var(--accent-red)" }}>
+                                R$&nbsp;{formatBRL(data.summary.despesas)}
+                            </span>
+                        </div>
+                        <div className="p-3 rounded-[12px] border flex flex-col items-center justify-center text-center transition-colors" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
+                            <span className="text-[10px] sm:text-[11px] uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>Saldo</span>
+                            <span className="text-[12px] sm:text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                                R$&nbsp;{formatBRL(data.summary.saldo)}
+                            </span>
+                        </div>
+                    </div>
+                    </>
                 )
             )}
 
@@ -546,7 +628,8 @@ export default function TransacoesPage() {
                 </div>
             ) : data ? (
                 <>
-                    <table className="w-full text-[13px]">
+                    <div className="hidden md:block w-full overflow-x-auto pb-4">
+                        <table className="w-full text-[13px] min-w-[700px]">
                         <thead>
                             <tr style={{ borderBottom: "1px solid var(--border)" }}>
                                 {/* Checkbox all */}
@@ -725,6 +808,148 @@ export default function TransacoesPage() {
                             })}
                         </tbody>
                     </table>
+                    </div>
+
+                    {/* Mobile List View (Grouped & Collapsible) */}
+                    <div className="md:hidden flex flex-col gap-6">
+                        {Object.entries(
+                            data.transactions.reduce((acc, tx) => {
+                                const group = formatRelativeDate(tx.date);
+                                if (!acc[group]) acc[group] = [];
+                                acc[group].push(tx);
+                                return acc;
+                            }, {} as Record<string, Transaction[]>)
+                        ).map(([groupDate, txs]) => (
+                            <div key={groupDate} className="flex flex-col gap-3">
+                                <h3 className="text-[13px] font-semibold tracking-wide ml-1" style={{ color: "var(--text-muted)" }}>{groupDate}</h3>
+                                {txs.map((tx) => {
+                                    const isIncome = tx.type === "receita";
+                                    const dot = statusDot(tx.categoryConfidence);
+                                    const isSelected = selected.has(tx.id);
+                                    const isExpanded = expandedTxId === tx.id;
+                                    const catColor = getCategoryColor(tx.category);
+                                    const Icon = getCategoryIcon(tx.category);
+
+                                    return (
+                                        <div
+                                            key={tx.id}
+                                            className={`relative p-3 rounded-[12px] transition-colors`}
+                                            style={{
+                                                background: isExpanded || isSelected ? "rgba(59,130,246,0.06)" : "transparent",
+                                                border: isSelected ? "1px solid #5B8FD4" : "1px solid transparent",
+                                            }}
+                                            onClick={() => {
+                                                if (!editingBeneficiary && !editingCategoryId) {
+                                                    setExpandedTxId(isExpanded ? null : tx.id);
+                                                }
+                                            }}
+                                        >
+                                            <div className="flex items-center gap-3 w-full">
+                                                {/* Category Icon */}
+                                                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors" style={{ background: `${catColor.dot}20`, color: catColor.dot }}>
+                                                    <Icon strokeWidth={2.5} size={18} />
+                                                </div>
+                                                
+                                                {/* Info */}
+                                                <div className="flex flex-col flex-1 overflow-hidden">
+                                                    <span className="text-[14px] font-medium whitespace-nowrap overflow-hidden text-ellipsis w-full" style={{ color: "var(--text-primary)" }}>
+                                                        {tx.description}
+                                                    </span>
+                                                    <span className="text-[12px] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis w-full" style={{ color: "var(--text-muted)" }}>
+                                                        {new Date(tx.date).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} • {tx.beneficiary || "Pix"}
+                                                    </span>
+                                                </div>
+
+                                                {/* Amount */}
+                                                <div className="text-right shrink-0 ml-1">
+                                                    <span
+                                                        className="text-[14px] font-semibold"
+                                                        style={{
+                                                            color: isIncome ? "var(--accent-green)" : "var(--text-primary)",
+                                                            fontVariantNumeric: "tabular-nums"
+                                                        }}
+                                                    >
+                                                        {isIncome ? "+" : ""}
+                                                        R$&nbsp;{formatBRL(Math.abs(Number(tx.amount)))}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Expanded content */}
+                                            {isExpanded && (
+                                                <div className="flex flex-col gap-3 mt-4 pt-4" style={{ borderTop: "1px dashed var(--border)" }}>
+                                                    {/* Beneficiary */}
+                                                    <div className="flex flex-col" onClick={(e) => e.stopPropagation()}>
+                                                        <span className="text-[11px] font-medium tracking-wide uppercase mb-1" style={{ color: "var(--text-muted)" }}>Beneficiário</span>
+                                                        {editingBeneficiary?.id === tx.id ? (
+                                                            <input
+                                                                autoFocus
+                                                                value={editingBeneficiary.value}
+                                                                onChange={(e) => setEditingBeneficiary({ id: tx.id, value: e.target.value })}
+                                                                onBlur={() => saveBeneficiary(tx.id, editingBeneficiary.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter") saveBeneficiary(tx.id, editingBeneficiary.value);
+                                                                    if (e.key === "Escape") setEditingBeneficiary(null);
+                                                                }}
+                                                                className="w-full px-2 py-1.5 rounded-[6px] text-[13px]"
+                                                                style={{
+                                                                    background: "var(--bg-elevated)",
+                                                                    border: "1px solid #5B8FD4",
+                                                                    color: "var(--text-primary)",
+                                                                    outline: "none",
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <span
+                                                                className="text-[13px] rounded-[4px] px-1 -mx-1 py-1 cursor-text transition-colors"
+                                                                style={{ color: "var(--text-primary)" }}
+                                                                onClick={() => setEditingBeneficiary({ id: tx.id, value: tx.beneficiary || "" })}
+                                                            >
+                                                                {tx.beneficiary || <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>Adicionar beneficiário...</span>}
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Category & Checkbox */}
+                                                    <div className="flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="relative flex-1">
+                                                            <CategoryBadge
+                                                                category={tx.category}
+                                                                subcategory={tx.subcategory}
+                                                                confidence={tx.categoryConfidence}
+                                                                onClick={() => setEditingCategoryId(editingCategoryId === tx.id ? null : tx.id)}
+                                                            />
+                                                            {editingCategoryId === tx.id && (
+                                                                <div className="absolute left-0 top-full mt-2 z-50">
+                                                                    <CategoryPicker
+                                                                        current={tx.category}
+                                                                        currentSubcategory={tx.subcategory}
+                                                                        onSelect={(cat, sub) => updateCategory(tx.id, cat, sub)}
+                                                                        onClose={() => setEditingCategoryId(null)}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>Selecionar</span>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isSelected}
+                                                                onChange={(e) => { e.stopPropagation(); toggleSelect(tx.id); }}
+                                                                className="w-5 h-5 cursor-pointer ml-1"
+                                                                style={{ accentColor: "#5B8FD4" }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ))}
+                    </div>
 
                     {/* Pagination */}
                     <div className="flex items-center justify-center gap-4 mt-4 text-caption" style={{ color: "var(--text-secondary)" }}>

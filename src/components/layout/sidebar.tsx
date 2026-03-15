@@ -17,12 +17,14 @@ import {
     Diamond,
     LogOut,
     Zap,
+    Tags,
 } from "lucide-react";
 
 const navItems = [
     { href: "/copiloto", label: "Copiloto", icon: MessageSquare },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/transacoes", label: "Transações", icon: List },
+    { href: "/categorias", label: "Categorias", icon: Tags },
     { href: "/orcamentos", label: "Orçamentos", icon: PieChart },
     { href: "/metas", label: "Metas", icon: Target },
     { href: "/automacoes", label: "Automações", icon: Zap },
@@ -49,7 +51,7 @@ export function Sidebar() {
 
     return (
         <aside
-            className="flex flex-col h-screen w-[220px] shrink-0 border-r"
+            className="hidden md:flex flex-col h-[100dvh] w-[220px] shrink-0 border-r"
             style={{
                 background: "var(--bg-surface)",
                 borderColor: "var(--border)",

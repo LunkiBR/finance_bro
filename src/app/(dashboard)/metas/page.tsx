@@ -91,7 +91,7 @@ export default function MetasPage() {
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
                 <h1 className="text-h1" style={{ color: "var(--text-primary)" }}>Metas financeiras</h1>
                 <button
                     onClick={() => setShowModal(true)}
@@ -109,7 +109,7 @@ export default function MetasPage() {
                     <span className="text-body" style={{ color: "var(--text-muted)" }}>Carregando...</span>
                 </div>
             ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {[...activeGoals, ...pausedGoals].map((g) => {
                         const remaining = g.target - g.current;
                         const monthsLeft = calcMonthsRemaining(g.deadline);
@@ -265,8 +265,8 @@ export default function MetasPage() {
 
             {/* New Goal Modal */}
             {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
-                    <div className="w-[400px] rounded-[6px] border p-6" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in" style={{ background: "rgba(0,0,0,0.6)" }}>
+                    <div className="w-[400px] rounded-[6px] border p-6 animate-scale-in" style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}>
                         <div className="flex items-center justify-between mb-6">
                             <h3 className="text-h3" style={{ color: "var(--text-primary)" }}>Nova Meta</h3>
                             <button onClick={() => setShowModal(false)} style={{ color: "var(--text-muted)" }}><X size={16} /></button>

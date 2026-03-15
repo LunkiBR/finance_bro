@@ -213,6 +213,34 @@ export const payeeNotes = pgTable("ff_payee_notes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ─── Categorias Personalizadas do Usuário ────────────────────────────────────
+// Per-user custom categories with AI context for smart categorization
+
+export const userCategories = pgTable(
+  "ff_user_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: text("type").notNull().default("despesa"), // despesa | receita | ambos
+    parent: text("parent"), // NULL = root category, "Alimentação" = subcategory of that
+    subcategories: text("subcategories").array().default([]),
+    colorBg: text("color_bg"),
+    colorText: text("color_text"),
+    colorDot: text("color_dot"),
+    icon: text("icon").notNull().default("Tag"), // Lucide icon name
+    aiContext: text("ai_context"), // "Restaurante Universitário da UNICAMP"
+    aiExamples: text("ai_examples").array().default([]), // ["RU UNICAMP", "REST UNIVERSITARIO"]
+    sortOrder: integer("sort_order").default(100),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_user_category_name").on(table.userId, table.name),
+  ]
+);
+
 // ─── Sínteses da IA (geradas após importação) ────────────────────────────────
 
 export const aiSummaries = pgTable("ff_ai_summaries", {
@@ -243,3 +271,5 @@ export type PayeeNote = typeof payeeNotes.$inferSelect;
 export type UserCategoryRule = typeof userCategoryRules.$inferSelect;
 export type NewUserCategoryRule = typeof userCategoryRules.$inferInsert;
 export type AiSummary = typeof aiSummaries.$inferSelect;
+export type UserCategory = typeof userCategories.$inferSelect;
+export type NewUserCategory = typeof userCategories.$inferInsert;

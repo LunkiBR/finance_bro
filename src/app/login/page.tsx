@@ -4,6 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Diamond, Eye, EyeOff, Loader2 } from "lucide-react";
+import Link from "next/link";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -26,7 +27,14 @@ export default function LoginPage() {
             });
 
             if (res?.error) {
-                setError("Usuário ou senha inválidos.");
+                const code = res.code ?? res.error;
+                if (code === "account_pending") {
+                    setError("Conta aguardando aprovação do administrador.");
+                } else if (code === "account_suspended") {
+                    setError("Conta suspensa. Entre em contato com o administrador.");
+                } else {
+                    setError("Usuário ou senha inválidos.");
+                }
                 setLoading(false);
                 return;
             }
@@ -212,11 +220,17 @@ export default function LoginPage() {
                 </div>
 
                 {/* Footer */}
-                <p
-                    className="text-center text-caption mt-4"
-                    style={{ color: "var(--text-muted)" }}
-                >
-                    Elytra AI — Finance Friend
+                <p className="text-center text-caption mt-4" style={{ color: "var(--text-muted)" }}>
+                    Não tem conta?{" "}
+                    <Link
+                        href="/register"
+                        className="transition-colors"
+                        style={{ color: "var(--text-secondary)" }}
+                        onMouseEnter={(e) => { (e.target as HTMLElement).style.color = "var(--text-primary)"; }}
+                        onMouseLeave={(e) => { (e.target as HTMLElement).style.color = "var(--text-secondary)"; }}
+                    >
+                        Criar conta
+                    </Link>
                 </p>
             </div>
         </div>

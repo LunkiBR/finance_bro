@@ -52,6 +52,8 @@ export const users = pgTable("ff_users", {
   passwordHash: text("password_hash").notNull(),
   name: varchar("name", { length: 200 }),
   role: varchar("role", { length: 20 }).notNull().default("user"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  avatarUrl: text("avatar_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

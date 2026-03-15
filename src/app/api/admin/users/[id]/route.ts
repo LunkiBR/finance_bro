@@ -15,12 +15,13 @@ export async function PATCH(
   if (role !== "admin") return Response.json({ error: "Acesso restrito a administradores." }, { status: 403 });
 
   const { id } = await params;
-  const { username, email, name, role: newRole, password } = (await req.json()) as {
+  const { username, email, name, role: newRole, password, status: newStatus } = (await req.json()) as {
     username?: string;
     email?: string;
     name?: string;
     role?: string;
     password?: string;
+    status?: string;
   };
 
   // Uniqueness check excluding this user
@@ -47,6 +48,7 @@ export async function PATCH(
   if (username?.trim()) updates.username = username.trim();
   if (email?.trim()) updates.email = email.trim().toLowerCase();
   if (newRole === "admin" || newRole === "user") updates.role = newRole;
+  if (newStatus === "active" || newStatus === "pending" || newStatus === "suspended") updates.status = newStatus;
   if (password?.trim()) updates.passwordHash = await bcrypt.hash(password, 12);
 
   const [updated] = await db
@@ -59,6 +61,8 @@ export async function PATCH(
       username: users.username,
       email: users.email,
       role: users.role,
+      status: users.status,
+      avatarUrl: users.avatarUrl,
       createdAt: users.createdAt,
     });
 

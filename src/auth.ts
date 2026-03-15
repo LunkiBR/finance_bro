@@ -1,9 +1,17 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
+
+class AccountPendingError extends CredentialsSignin {
+  code = "account_pending";
+}
+
+class AccountSuspendedError extends CredentialsSignin {
+  code = "account_suspended";
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -29,11 +37,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         );
         if (!valid) return null;
 
+        if (user.status === "pending") throw new AccountPendingError();
+        if (user.status === "suspended") throw new AccountSuspendedError();
+
         return {
           id: user.id,
           name: user.name ?? user.username,
           email: user.email,
           role: user.role,
+          avatarUrl: user.avatarUrl ?? undefined,
         };
       },
     }),
@@ -49,6 +61,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id as string;
         token.role = (user as { role: string }).role;
+        token.avatarUrl = (user as { avatarUrl?: string }).avatarUrl ?? null;
       }
       return token;
     },
@@ -56,6 +69,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (token && session.user) {
         session.user.id = token.id as string;
         (session.user as { role?: string }).role = token.role as string;
+        (session.user as { avatarUrl?: string | null }).avatarUrl = token.avatarUrl as string | null;
       }
       return session;
     },

@@ -18,6 +18,7 @@ import {
     LogOut,
     Zap,
     Tags,
+    BookOpen,
 } from "lucide-react";
 
 const navItems = [
@@ -39,6 +40,7 @@ export function Sidebar() {
 
     const userName = session?.user?.name || "Usuário";
     const userInitial = userName[0]?.toUpperCase() || "U";
+    const avatarUrl = (session?.user as { avatarUrl?: string | null })?.avatarUrl;
 
     useEffect(() => {
         fetch("/api/alerts")
@@ -91,6 +93,20 @@ export function Sidebar() {
 
             {/* Navigation */}
             <nav className="flex-1 px-3 space-y-[2px] overflow-y-auto">
+                <Link
+                    href="/bem-vindo"
+                    className="flex items-center gap-2.5 px-3 py-[7px] rounded-[6px] text-[13px] transition-colors mb-2"
+                    style={{
+                        background: pathname === "/bem-vindo" ? "var(--bg-elevated)" : "transparent",
+                        color: pathname === "/bem-vindo" ? "var(--text-primary)" : "var(--text-muted)",
+                        fontWeight: pathname === "/bem-vindo" ? 500 : 400,
+                    }}
+                    onMouseEnter={(e) => { if (pathname !== "/bem-vindo") e.currentTarget.style.background = "var(--bg-elevated)"; }}
+                    onMouseLeave={(e) => { if (pathname !== "/bem-vindo") e.currentTarget.style.background = "transparent"; }}
+                >
+                    <BookOpen size={16} />
+                    <span>Como usar</span>
+                </Link>
                 {navItems.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
                     return (
@@ -167,16 +183,25 @@ export function Sidebar() {
                     className="flex items-center gap-2.5 px-3 py-[7px] text-[13px]"
                     style={{ color: "var(--text-secondary)" }}
                 >
-                    <div
-                        className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[11px] font-medium"
-                        style={{
-                            background: "var(--bg-elevated)",
-                            color: "var(--text-primary)",
-                            border: "1px solid var(--border)",
-                        }}
-                    >
-                        {userInitial}
-                    </div>
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt={userName}
+                            className="w-[22px] h-[22px] rounded-full object-cover shrink-0"
+                            style={{ border: "1px solid var(--border)" }}
+                        />
+                    ) : (
+                        <div
+                            className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[11px] font-medium shrink-0"
+                            style={{
+                                background: "var(--bg-elevated)",
+                                color: "var(--text-primary)",
+                                border: "1px solid var(--border)",
+                            }}
+                        >
+                            {userInitial}
+                        </div>
+                    )}
                     <span>{userName}</span>
                 </div>
             </div>

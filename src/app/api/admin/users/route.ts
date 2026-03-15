@@ -18,6 +18,8 @@ export async function GET() {
       username: users.username,
       email: users.email,
       role: users.role,
+      status: users.status,
+      avatarUrl: users.avatarUrl,
       createdAt: users.createdAt,
     })
     .from(users)
@@ -67,6 +69,7 @@ export async function POST(req: NextRequest) {
       passwordHash,
       name: name?.trim() || null,
       role: newRole === "admin" ? "admin" : "user",
+      status: "active" as const,
     })
     .returning({
       id: users.id,
@@ -74,6 +77,8 @@ export async function POST(req: NextRequest) {
       username: users.username,
       email: users.email,
       role: users.role,
+      status: users.status,
+      avatarUrl: users.avatarUrl,
       createdAt: users.createdAt,
     });
 

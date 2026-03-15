@@ -45,7 +45,7 @@ export default function SummaryPage() {
             });
 
             sessionStorage.removeItem("onboarding_profile");
-            router.push("/copiloto");
+            router.push("/bem-vindo");
         } catch {
             setSaving(false);
         }

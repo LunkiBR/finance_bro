@@ -216,7 +216,7 @@ export default function BemVindoPage() {
                                 Criador do Finance Friend · Elytra AI
                             </p>
                             <p className="text-[14px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                                Oi! Que bom ter você aqui. Isso que você está vendo é um projeto que nasceu de uma dor real — e que agora estou compartilhando com as pessoas que mais importam pra mim.
+                                Oi gente, tudo bem? Que bom ter você aqui. Isso que você está vendo é um projeto que nasceu de uma dor real, e que agora estou compartilhando com as pessoas que mais importam pra mim.
                             </p>
                         </div>
                     </div>
@@ -224,10 +224,10 @@ export default function BemVindoPage() {
                     {/* Corpo da carta */}
                     <div className="p-6 space-y-4 text-[14px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
                         <p>
-                            Sou apaixonado por inteligência artificial e criação de softwares. Todo mês eu perdia pelo menos <strong style={{ color: "var(--text-primary)" }}>3 horas</strong> categorizando meus gastos manualmente — no HomeBudget, em planilhas, em qualquer plataforma que tentasse usar. Era um atrito enorme, chato demais, e no fim eu nunca tinha uma visão realmente clara dos meus padrões financeiros.
+                            Sou apaixonado por inteligência artificial e criação de softwares. Todo mês eu perdia pelo menos <strong style={{ color: "var(--text-primary)" }}>3 horas</strong> categorizando meus gastos manualmente no HomeBank, em planilhas, em qualquer plataforma que tentasse usar. Era um atrito enorme, chato demais, e no fim eu nunca tinha uma visão realmente clara dos meus padrões financeiros.
                         </p>
                         <p>
-                            Aí pensei: <em style={{ color: "var(--text-primary)" }}>se eu sei fazer automações e IA, por que não resolver esse problema de vez?</em> Nasceu o Finance Friend — uma ferramenta que importa seus extratos bancários automaticamente, categoriza tudo com IA e ainda tem um copiloto que você pode perguntar qualquer coisa sobre o seu dinheiro.
+                            Aí pensei: <em style={{ color: "var(--text-primary)" }}>se eu sei fazer automações e IA, por que não resolver esse problema de vez?</em> Nasceu o Finance Friend, uma ferramenta que importa seus extratos bancários automaticamente, categoriza tudo com IA e ainda tem um copiloto que você pode perguntar qualquer coisa sobre o seu dinheiro.
                         </p>
                         <p>
                             Essa é a <strong style={{ color: "var(--text-primary)" }}>beta fechada</strong>, disponível apenas para família e amigos próximos. Vocês são os primeiros a usar, e o feedback de vocês vai moldar o que esse produto vai se tornar. Usem sem moderação, tentem quebrar, e me contem tudo o que acham.
@@ -453,7 +453,7 @@ export default function BemVindoPage() {
                             WhatsApp
                         </a>
                         <a
-                            href="mailto:leoanrdo@elytraai.com.br"
+                            href="mailto:leonardo@elytraai.com.br"
                             className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-[6px] border text-[13px] font-medium transition-colors w-full sm:w-auto"
                             style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
                             onMouseEnter={(e) => {
@@ -469,7 +469,7 @@ export default function BemVindoPage() {
                                 <rect width="20" height="16" x="2" y="4" rx="2" />
                                 <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
                             </svg>
-                            leoanrdo@elytraai.com.br
+                            leonardo@elytraai.com.br
                         </a>
                     </div>
                 </div>

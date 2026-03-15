@@ -8,6 +8,8 @@ export default auth((req) => {
   // Rotas públicas — não requerem autenticação
   const isPublic =
     pathname.startsWith("/login") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/awaiting-approval") ||
     pathname.startsWith("/api/auth");
 
   if (!isLoggedIn && !isPublic) {

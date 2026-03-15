@@ -1,3 +1,5 @@
+"use client";
+
 import { Diamond, Clock } from "lucide-react";
 import Link from "next/link";
 

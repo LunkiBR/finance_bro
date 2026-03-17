@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { transactions, payeeMappings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, safeDecrypt, deterministicHash } from "@/lib/encryption";
 
 function normalizeBeneficiary(raw: string): string {
   return (raw || "")
@@ -28,26 +29,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "beneficiary and category are required." }, { status: 400 });
     }
 
-    // 1. Update all transactions for this beneficiary
-    await db
-      .update(transactions)
-      .set({ category, categoryConfidence: "manual" })
-      .where(and(eq(transactions.userId, userId), eq(transactions.beneficiary, beneficiary)));
+    // Can't use SQL WHERE on encrypted beneficiary — fetch all and filter in JS
+    const allTx = await db
+      .select({ id: transactions.id, beneficiary: transactions.beneficiary })
+      .from(transactions)
+      .where(eq(transactions.userId, userId));
 
-    // 2. Upsert payee mapping so future imports get the right category
+    const matchingIds = allTx
+      .filter(tx => safeDecrypt(tx.beneficiary) === beneficiary)
+      .map(tx => tx.id);
+
+    // Update matching transactions by ID
+    for (const txId of matchingIds) {
+      await db
+        .update(transactions)
+        .set({ category, categoryConfidence: "manual" })
+        .where(and(eq(transactions.id, txId), eq(transactions.userId, userId)));
+    }
+
+    // Upsert payee mapping with encryption
     const normalized = normalizeBeneficiary(beneficiary);
+    const hash = deterministicHash(normalized);
     await db
       .insert(payeeMappings)
       .values({
         userId,
-        beneficiaryNormalized: normalized,
-        beneficiaryDisplay: beneficiary,
+        beneficiaryNormalized: encrypt(normalized),
+        beneficiaryDisplay: encrypt(beneficiary),
+        beneficiaryHash: hash,
         category,
         subcategory: null,
         confidence: "manual",
       })
       .onConflictDoUpdate({
-        target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
+        target: [payeeMappings.userId, payeeMappings.beneficiaryHash],
         set: {
           category,
           subcategory: null,

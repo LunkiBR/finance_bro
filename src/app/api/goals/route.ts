@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { goals } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, encryptNumber, safeDecrypt, safeDecryptNumber } from "@/lib/encryption";
 
 export async function GET() {
     const authResult = await requireAuth();
@@ -11,14 +12,19 @@ export async function GET() {
 
     try {
         const rows = await db.select().from(goals).where(eq(goals.userId, userId));
-        const enriched = rows.map((g) => ({
-            ...g,
-            current: Number(g.currentAmount),
-            target: Number(g.targetAmount),
-            pct: Number(g.targetAmount) > 0
-                ? Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100)
-                : 0,
-        }));
+        const enriched = rows.map((g) => {
+            const current = safeDecryptNumber(g.currentAmount);
+            const target = safeDecryptNumber(g.targetAmount);
+            return {
+                ...g,
+                name: safeDecrypt(g.name),
+                currentAmount: String(current),
+                targetAmount: String(target),
+                current,
+                target,
+                pct: target > 0 ? Math.round((current / target) * 100) : 0,
+            };
+        });
         return NextResponse.json(enriched);
     } catch (err) {
         console.error("Goals error:", err);
@@ -35,9 +41,9 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         await db.insert(goals).values({
             userId,
-            name: body.name,
-            targetAmount: body.targetAmount,
-            currentAmount: body.currentAmount || "0",
+            name: encrypt(body.name),
+            targetAmount: encryptNumber(Number(body.targetAmount)),
+            currentAmount: body.currentAmount ? encryptNumber(Number(body.currentAmount)) : encryptNumber(0),
             deadline: body.deadline || null,
         });
         return NextResponse.json({ success: true });

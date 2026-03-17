@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { payeeMappings } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, safeDecrypt, deterministicHash } from "@/lib/encryption";
 
 export async function GET() {
   const authResult = await requireAuth();
@@ -15,7 +16,12 @@ export async function GET() {
       .from(payeeMappings)
       .where(eq(payeeMappings.userId, userId))
       .orderBy(desc(payeeMappings.createdAt));
-    return NextResponse.json({ mappings: rows });
+    const decrypted = rows.map(r => ({
+      ...r,
+      beneficiaryNormalized: safeDecrypt(r.beneficiaryNormalized),
+      beneficiaryDisplay: r.beneficiaryDisplay ? safeDecrypt(r.beneficiaryDisplay) : null,
+    }));
+    return NextResponse.json({ mappings: decrypted });
   } catch (err) {
     console.error("Payee mappings GET error:", err);
     return NextResponse.json({ error: "Erro ao carregar mapeamentos." }, { status: 500 });
@@ -35,22 +41,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "beneficiaryNormalized e category são obrigatórios." }, { status: 400 });
     }
 
+    const hash = deterministicHash(beneficiaryNormalized);
+
     await db
       .insert(payeeMappings)
       .values({
         userId,
-        beneficiaryNormalized,
-        beneficiaryDisplay: beneficiaryDisplay || null,
+        beneficiaryNormalized: encrypt(beneficiaryNormalized),
+        beneficiaryDisplay: beneficiaryDisplay ? encrypt(beneficiaryDisplay) : null,
+        beneficiaryHash: hash,
         category,
         subcategory: subcategory || null,
         confidence: confidence || "manual",
       })
       .onConflictDoUpdate({
-        target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
+        target: [payeeMappings.userId, payeeMappings.beneficiaryHash],
         set: {
           category,
           subcategory: subcategory || null,
           confidence: confidence || "manual",
+          beneficiaryDisplay: beneficiaryDisplay ? encrypt(beneficiaryDisplay) : null,
           updatedAt: new Date(),
         },
       });

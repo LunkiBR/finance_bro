@@ -6,8 +6,38 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import type { ChartSpec } from "./chart-types";
 import { CATEGORY_TAXONOMY, ALL_CATEGORIES, isValidCategory, isValidCategoryIn } from "./categories";
 import { getMergedTaxonomy, buildCategoryPromptSection } from "./categories-server";
+import { logTokenUsage } from "./token-tracking";
+import { encrypt, safeDecrypt, safeDecryptNumber, deterministicHash } from "./encryption";
 
 export const genai = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+
+// ─── Decryption Helpers ──────────────────────────────────────────────────────
+
+type DecTx = {
+  id: string; type: "receita" | "despesa"; category: string; subcategory: string | null;
+  month: string; date: string; description: string; beneficiary: string;
+  amount: number; source: string | null; categoryConfidence: "high" | "low" | "manual" | null;
+};
+
+function decryptTx(row: typeof transactions.$inferSelect): DecTx {
+  return {
+    id: row.id,
+    type: row.type,
+    category: row.category,
+    subcategory: row.subcategory,
+    month: row.month,
+    date: row.date,
+    description: safeDecrypt(row.description),
+    beneficiary: safeDecrypt(row.beneficiary),
+    amount: safeDecryptNumber(row.amount),
+    source: row.source,
+    categoryConfidence: row.categoryConfidence,
+  };
+}
+
+function normalizeBeneficiary(raw: string): string {
+  return (raw || "").toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").substring(0, 100);
+}
 
 // ─── Context Snapshot ─────────────────────────────────────────────────────────
 
@@ -29,20 +59,10 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
     const snapshotPrev2 = prevMonthFn(snapshotPrev1);
     const snapshotPrev3 = prevMonthFn(snapshotPrev2);
 
-    // Run all queries in parallel
-    const [monthlySummary, budgetStatus, activeGoals, activeAlerts, profile, recurringSnapshot] = await Promise.all([
-      // Monthly summary for last 2 months
-      db.select({
-        month: transactions.month,
-        type: transactions.type,
-        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-        count: sql<number>`COUNT(*)`,
-      })
-        .from(transactions)
-        .where(eq(transactions.userId, userId))
-        .groupBy(transactions.month, transactions.type)
-        .orderBy(desc(transactions.month))
-        .limit(8),
+    // Run all queries in parallel — fetch raw, decrypt in JS
+    const [allTxRows, budgetStatus, activeGoals, activeAlerts, profile, recurringTxRows] = await Promise.all([
+      // All transactions for this user (for monthly summary)
+      db.select().from(transactions).where(eq(transactions.userId, userId)),
 
       // Budget status current month
       db.select().from(budgets).where(and(eq(budgets.userId, userId), eq(budgets.month, currentMonth))),
@@ -56,29 +76,25 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
       // User profile
       db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1),
 
-      // Recurring beneficiaries (appeared in ≥2 of last 3 completed months)
-      db.select({
-        beneficiary: transactions.beneficiary,
-        category: sql<string>`MAX(${transactions.category})`,
-        avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
-      })
-        .from(transactions)
-        .where(and(
-          eq(transactions.userId, userId),
-          inArray(transactions.month, [snapshotPrev1, snapshotPrev2, snapshotPrev3]),
-          eq(transactions.type, "despesa"),
-        ))
-        .groupBy(transactions.beneficiary)
-        .having(sql`COUNT(DISTINCT ${transactions.month}) >= 2`)
-        .orderBy(desc(sql`AVG(${transactions.amount}::numeric)`))
-        .limit(8),
+      // Transactions for recurring analysis (last 3 completed months, expenses only)
+      db.select().from(transactions).where(and(
+        eq(transactions.userId, userId),
+        inArray(transactions.month, [snapshotPrev1, snapshotPrev2, snapshotPrev3]),
+        eq(transactions.type, "despesa"),
+      )),
     ]);
 
-    // Build monthly summary structure
+    // Monthly summary: decrypt amounts and aggregate by month+type
     const monthMap: Record<string, { receitas: number; despesas: number }> = {};
-    for (const row of monthlySummary) {
+    for (const row of allTxRows) {
+      const amt = safeDecryptNumber(row.amount);
       if (!monthMap[row.month]) monthMap[row.month] = { receitas: 0, despesas: 0 };
-      monthMap[row.month][row.type === "receita" ? "receitas" : "despesas"] = Number(row.total);
+      monthMap[row.month][row.type === "receita" ? "receitas" : "despesas"] += amt;
+    }
+    // Round
+    for (const m of Object.values(monthMap)) {
+      m.receitas = Math.round(m.receitas * 100) / 100;
+      m.despesas = Math.round(m.despesas * 100) / 100;
     }
 
     const months = Object.entries(monthMap)
@@ -88,27 +104,53 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
     const currentMonthData = monthMap[currentMonth] ?? { receitas: 0, despesas: 0 };
     const saldo = currentMonthData.receitas - currentMonthData.despesas;
 
-    // Budget status
-    const budgetsOverLimit = budgetStatus.filter(
-      (b) => Number(b.spentAmount) > Number(b.limitAmount)
-    );
-    const budgetsWarning = budgetStatus.filter(
-      (b) =>
-        Number(b.spentAmount) / Number(b.limitAmount) >= 0.8 &&
-        Number(b.spentAmount) <= Number(b.limitAmount)
-    );
+    // Budget status — decrypt amounts
+    const decBudgets = budgetStatus.map(b => ({
+      ...b,
+      spentAmount: safeDecryptNumber(b.spentAmount),
+      limitAmount: safeDecryptNumber(b.limitAmount),
+    }));
+    const budgetsOverLimit = decBudgets.filter(b => b.spentAmount > b.limitAmount);
+    const budgetsWarning = decBudgets.filter(b => b.spentAmount / b.limitAmount >= 0.8 && b.spentAmount <= b.limitAmount);
 
-    // Goals
+    // Goals — decrypt amounts
     const goalsInfo = activeGoals.map((g) => {
-      const pct = g.targetAmount
-        ? Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100)
-        : 0;
-      const remaining = Number(g.targetAmount) - Number(g.currentAmount);
-      return `${g.name} ${pct}% (faltam R$ ${remaining.toFixed(2)}${g.deadline ? ` até ${g.deadline}` : ""})`;
+      const target = safeDecryptNumber(g.targetAmount);
+      const current = safeDecryptNumber(g.currentAmount);
+      const name = safeDecrypt(g.name);
+      const pct = target ? Math.round((current / target) * 100) : 0;
+      const remaining = target - current;
+      return `${name} ${pct}% (faltam R$ ${remaining.toFixed(2)}${g.deadline ? ` até ${g.deadline}` : ""})`;
     });
 
-    // Profile
-    const user = profile[0];
+    // Profile — decrypt fields
+    const user = profile[0] ? {
+      ...profile[0],
+      nome: safeDecrypt(profile[0].nome),
+      rendaMensal: profile[0].rendaMensal ? safeDecryptNumber(profile[0].rendaMensal) : null,
+      objetivoPrincipal: profile[0].objetivoPrincipal ? safeDecrypt(profile[0].objetivoPrincipal) : null,
+      aiNotes: profile[0].aiNotes ? safeDecrypt(profile[0].aiNotes) : null,
+    } : null;
+
+    // Recurring beneficiaries: decrypt, group by beneficiary, compute avg, filter ≥2 months
+    const recurringMap: Record<string, { category: string; months: Set<string>; amounts: number[] }> = {};
+    for (const row of recurringTxRows) {
+      const ben = safeDecrypt(row.beneficiary);
+      const amt = safeDecryptNumber(row.amount);
+      if (!recurringMap[ben]) recurringMap[ben] = { category: row.category, months: new Set(), amounts: [] };
+      recurringMap[ben].months.add(row.month);
+      recurringMap[ben].amounts.push(amt);
+      recurringMap[ben].category = row.category; // last wins (like MAX)
+    }
+    const recurringSnapshot = Object.entries(recurringMap)
+      .filter(([, v]) => v.months.size >= 2)
+      .map(([beneficiary, v]) => ({
+        beneficiary,
+        category: v.category,
+        avgAmount: Math.round((v.amounts.reduce((s, a) => s + a, 0) / v.amounts.length) * 100) / 100,
+      }))
+      .sort((a, b) => b.avgAmount - a.avgAmount)
+      .slice(0, 8);
 
     // Compose snapshot
     const lines: string[] = [
@@ -137,14 +179,14 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
       lines.push("");
       lines.push(`🚨 Orçamentos ESTOURADOS (${currentMonth}):`);
       budgetsOverLimit.forEach((b) => {
-        const pct = Math.round((Number(b.spentAmount) / Number(b.limitAmount)) * 100);
-        lines.push(`  • ${b.category}: R$ ${Number(b.spentAmount).toFixed(2)} / R$ ${Number(b.limitAmount).toFixed(2)} (${pct}%)`);
+        const pct = Math.round((b.spentAmount / b.limitAmount) * 100);
+        lines.push(`  • ${b.category}: R$ ${b.spentAmount.toFixed(2)} / R$ ${b.limitAmount.toFixed(2)} (${pct}%)`);
       });
     }
     if (budgetsWarning.length > 0) {
       lines.push(`⚠️  Orçamentos próximos do limite:`);
       budgetsWarning.forEach((b) => {
-        const pct = Math.round((Number(b.spentAmount) / Number(b.limitAmount)) * 100);
+        const pct = Math.round((b.spentAmount / b.limitAmount) * 100);
         lines.push(`  • ${b.category}: ${pct}% utilizado`);
       });
     }
@@ -158,28 +200,28 @@ export async function buildContextSnapshot(userId: string): Promise<string> {
 
     // Recurring expenses snapshot
     if (recurringSnapshot.length > 0) {
-      const recurringTotal = recurringSnapshot.reduce((s, r) => s + Number(r.avgAmount), 0);
+      const recurringTotal = recurringSnapshot.reduce((s, r) => s + r.avgAmount, 0);
       lines.push("");
       lines.push(`🔁 Gastos recorrentes (comprometido ~R$ ${recurringTotal.toFixed(2)}/mês):`);
       recurringSnapshot.slice(0, 5).forEach((r) => {
-        lines.push(`  • ${r.beneficiary} (${r.category ?? "Outros"}): ~R$ ${Number(r.avgAmount).toFixed(2)}/mês`);
+        lines.push(`  • ${r.beneficiary} (${r.category ?? "Outros"}): ~R$ ${r.avgAmount.toFixed(2)}/mês`);
       });
       if (recurringSnapshot.length > 5) {
         lines.push(`  • … e mais ${recurringSnapshot.length - 5} recorrentes`);
       }
     }
 
-    // Alerts
+    // Alerts — decrypt message
     if (activeAlerts.length > 0) {
       lines.push("");
-      lines.push(`🔔 Alertas ativos: ${activeAlerts.map((a) => a.message).join(" | ")}`);
+      lines.push(`🔔 Alertas ativos: ${activeAlerts.map((a) => safeDecrypt(a.message)).join(" | ")}`);
     }
 
     // User profile
     if (user) {
       lines.push("");
       lines.push(`👤 Perfil: ${user.nome}`);
-      if (user.rendaMensal) lines.push(`  Renda mensal: R$ ${Number(user.rendaMensal).toFixed(2)}`);
+      if (user.rendaMensal) lines.push(`  Renda mensal: R$ ${user.rendaMensal.toFixed(2)}`);
       if (user.objetivoPrincipal) lines.push(`  Objetivo principal: ${user.objetivoPrincipal}`);
       if (user.aiNotes) lines.push(`  📝 Notas da IA sobre o usuário: ${user.aiNotes}`);
     }
@@ -538,43 +580,57 @@ export async function executeTool(
       };
 
       if (groupBy === "category") {
-        const rows = await db.select({
-          category: transactions.category,
-          type: transactions.type,
-          total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-          count: sql<number>`COUNT(*)`,
-        }).from(transactions)
-          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined))
-          .groupBy(transactions.category, transactions.type)
-          .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`));
+        // Fetch raw → decrypt → aggregate by category+type in JS
+        const rawRows = await db.select().from(transactions)
+          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined));
+        const agg: Record<string, { category: string; type: string; total: number; count: number }> = {};
+        for (const row of rawRows) {
+          const key = `${row.category}|${row.type}`;
+          if (!agg[key]) agg[key] = { category: row.category, type: row.type, total: 0, count: 0 };
+          agg[key].total += safeDecryptNumber(row.amount);
+          agg[key].count++;
+        }
+        const rows = Object.values(agg)
+          .map(r => ({ ...r, total: Math.round(r.total * 100) / 100 }))
+          .sort((a, b) => b.total - a.total);
         return { result: rows };
       }
       if (groupBy === "beneficiary") {
-        const rows = await db.select({
-          beneficiary: transactions.beneficiary,
-          category: transactions.category,
-          total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-          count: sql<number>`COUNT(*)`,
-        }).from(transactions)
-          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
-          .groupBy(transactions.beneficiary, transactions.category)
-          .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`))
-          .limit(limit);
+        // Fetch raw → decrypt → aggregate by beneficiary+category in JS
+        const rawRows = await db.select().from(transactions)
+          .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined, type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined));
+        const agg: Record<string, { beneficiary: string; category: string; total: number; count: number }> = {};
+        for (const row of rawRows) {
+          const ben = safeDecrypt(row.beneficiary);
+          const key = `${ben}|${row.category}`;
+          if (!agg[key]) agg[key] = { beneficiary: ben, category: row.category, total: 0, count: 0 };
+          agg[key].total += safeDecryptNumber(row.amount);
+          agg[key].count++;
+        }
+        const rows = Object.values(agg)
+          .map(r => ({ ...r, total: Math.round(r.total * 100) / 100 }))
+          .sort((a, b) => b.total - a.total)
+          .slice(0, limit);
         return { result: rows };
       }
       if (groupBy === "month") {
-        const rows = await db.select({
-          month: transactions.month,
-          type: transactions.type,
-          total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-          count: sql<number>`COUNT(*)`,
-        }).from(transactions)
-          .where(and(eq(transactions.userId, userId), type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined))
-          .groupBy(transactions.month, transactions.type)
-          .orderBy(transactions.month);
+        // Fetch raw → decrypt → aggregate by month+type in JS
+        const rawRows = await db.select().from(transactions)
+          .where(and(eq(transactions.userId, userId), type ? eq(transactions.type, type) : undefined, category ? eq(transactions.category, category) : undefined));
+        const agg: Record<string, { month: string; type: string; total: number; count: number }> = {};
+        for (const row of rawRows) {
+          const key = `${row.month}|${row.type}`;
+          if (!agg[key]) agg[key] = { month: row.month, type: row.type, total: 0, count: 0 };
+          agg[key].total += safeDecryptNumber(row.amount);
+          agg[key].count++;
+        }
+        const rows = Object.values(agg)
+          .map(r => ({ ...r, total: Math.round(r.total * 100) / 100 }))
+          .sort((a, b) => a.month.localeCompare(b.month));
         return { result: rows };
       }
-      const rows = await db.select().from(transactions)
+      // groupBy === "none"
+      const rawRows = await db.select().from(transactions)
         .where(and(
           eq(transactions.userId, userId),
           month ? eq(transactions.month, month) : undefined,
@@ -584,30 +640,28 @@ export async function executeTool(
         ))
         .orderBy(desc(transactions.date))
         .limit(limit);
+      const rows = rawRows.map(decryptTx);
       return { result: rows };
     }
 
     // ── get_monthly_summary ──
     case "get_monthly_summary": {
       const { month } = input as { month?: string };
-      const rows = await db.select({
-        month: transactions.month,
-        type: transactions.type,
-        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-        count: sql<number>`COUNT(*)`,
-      }).from(transactions)
-        .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined))
-        .groupBy(transactions.month, transactions.type)
-        .orderBy(transactions.month);
+      // Fetch raw → decrypt → aggregate by month+type in JS
+      const rawRows = await db.select().from(transactions)
+        .where(and(eq(transactions.userId, userId), month ? eq(transactions.month, month) : undefined));
 
       const summary: Record<string, { month: string; receitas: number; despesas: number; saldo: number; transactions: number; savingsRate: number }> = {};
-      for (const row of rows) {
+      for (const row of rawRows) {
         if (!summary[row.month]) summary[row.month] = { month: row.month, receitas: 0, despesas: 0, saldo: 0, transactions: 0, savingsRate: 0 };
-        summary[row.month][row.type === "receita" ? "receitas" : "despesas"] = Number(row.total);
-        summary[row.month].transactions += Number(row.count);
+        const amt = safeDecryptNumber(row.amount);
+        summary[row.month][row.type === "receita" ? "receitas" : "despesas"] += amt;
+        summary[row.month].transactions++;
       }
       for (const m of Object.values(summary)) {
-        m.saldo = m.receitas - m.despesas;
+        m.receitas = Math.round(m.receitas * 100) / 100;
+        m.despesas = Math.round(m.despesas * 100) / 100;
+        m.saldo = Math.round((m.receitas - m.despesas) * 100) / 100;
         m.savingsRate = m.receitas > 0 ? Math.round((m.saldo / m.receitas) * 100) : 0;
       }
       return { result: Object.values(summary) };
@@ -618,13 +672,19 @@ export async function executeTool(
       const { month, category } = input as { month?: string; category?: string };
       const rows = await db.select().from(budgets)
         .where(and(eq(budgets.userId, userId), month ? eq(budgets.month, month) : undefined, category ? eq(budgets.category, category) : undefined));
-      const withPct = rows.map((b) => ({
-        ...b,
-        pctUsed: b.limitAmount ? Math.round((Number(b.spentAmount) / Number(b.limitAmount)) * 100) : 0,
-        remaining: Math.max(0, Number(b.limitAmount) - Number(b.spentAmount)),
-        status: Number(b.spentAmount) > Number(b.limitAmount) ? "exceeded"
-          : Number(b.spentAmount) / Number(b.limitAmount) > 0.8 ? "warning" : "ok",
-      }));
+      const withPct = rows.map((b) => {
+        const spent = safeDecryptNumber(b.spentAmount);
+        const limit = safeDecryptNumber(b.limitAmount);
+        return {
+          ...b,
+          spentAmount: spent,
+          limitAmount: limit,
+          pctUsed: limit ? Math.round((spent / limit) * 100) : 0,
+          remaining: Math.max(0, limit - spent),
+          status: spent > limit ? "exceeded"
+            : spent / limit > 0.8 ? "warning" : "ok",
+        };
+      });
       return { result: withPct };
     }
 
@@ -636,11 +696,11 @@ export async function executeTool(
         .where(and(eq(budgets.userId, userId), eq(budgets.category, category), eq(budgets.month, month))).limit(1);
       if (existing.length > 0) {
         await db.update(budgets)
-          .set({ limitAmount: String(limitAmount) })
+          .set({ limitAmount: encrypt(String(limitAmount)) })
           .where(and(eq(budgets.userId, userId), eq(budgets.category, category), eq(budgets.month, month)));
         return { result: { action: "updated", category, month, limitAmount, message: `Orçamento de "${category}" para ${month} atualizado para R$ ${limitAmount.toFixed(2)}.` } };
       } else {
-        await db.insert(budgets).values({ userId, category, month, limitAmount: String(limitAmount) });
+        await db.insert(budgets).values({ userId, category, month, limitAmount: encrypt(String(limitAmount)), spentAmount: encrypt("0") });
         return { result: { action: "created", category, month, limitAmount, message: `Orçamento de "${category}" para ${month} criado: R$ ${limitAmount.toFixed(2)}.` } };
       }
     }
@@ -649,11 +709,19 @@ export async function executeTool(
     case "get_goals": {
       const { status } = input as { status?: "active" | "completed" | "paused" };
       const rows = await db.select().from(goals).where(and(eq(goals.userId, userId), status ? eq(goals.status, status) : undefined));
-      const withPct = rows.map((g) => ({
-        ...g,
-        pctComplete: g.targetAmount ? Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100) : 0,
-        remaining: Math.max(0, Number(g.targetAmount) - Number(g.currentAmount)),
-      }));
+      const withPct = rows.map((g) => {
+        const target = safeDecryptNumber(g.targetAmount);
+        const current = safeDecryptNumber(g.currentAmount);
+        const name = safeDecrypt(g.name);
+        return {
+          ...g,
+          name,
+          targetAmount: target,
+          currentAmount: current,
+          pctComplete: target ? Math.round((current / target) * 100) : 0,
+          remaining: Math.max(0, target - current),
+        };
+      });
       return { result: withPct };
     }
 
@@ -662,33 +730,38 @@ export async function executeTool(
       const { name, targetAmount, deadline } = input as { name: string; targetAmount: number; deadline?: string };
       const [created] = await db.insert(goals).values({
         userId,
-        name,
-        targetAmount: String(targetAmount),
+        name: encrypt(name),
+        targetAmount: encrypt(String(targetAmount)),
+        currentAmount: encrypt("0"),
         deadline: deadline ?? null,
         status: "active",
       }).returning();
-      return { result: { ...created, message: `Meta "${name}" criada com sucesso! Alvo: R$ ${targetAmount.toFixed(2)}.` } };
+      return { result: { ...created, name, targetAmount, message: `Meta "${name}" criada com sucesso! Alvo: R$ ${targetAmount.toFixed(2)}.` } };
     }
 
     // ── update_goal_progress ──
     case "update_goal_progress": {
       const { goalName, currentAmount } = input as { goalName: string; currentAmount: number };
-      // Find goal by partial name match
+      // Find goal by partial name match — decrypt names for comparison
       const all = await db.select().from(goals).where(eq(goals.userId, userId));
-      const match = all.find((g) => g.name.toLowerCase().includes(goalName.toLowerCase()));
+      const match = all.find((g) => safeDecrypt(g.name).toLowerCase().includes(goalName.toLowerCase()));
       if (!match) return { result: `Nenhuma meta encontrada com o nome "${goalName}".` };
-      const isComplete = currentAmount >= Number(match.targetAmount);
+      const decName = safeDecrypt(match.name);
+      const decTarget = safeDecryptNumber(match.targetAmount);
+      const isComplete = currentAmount >= decTarget;
       await db.update(goals)
-        .set({ currentAmount: String(currentAmount), ...(isComplete ? { status: "completed" } : {}) })
+        .set({ currentAmount: encrypt(String(currentAmount)), ...(isComplete ? { status: "completed" as const } : {}) })
         .where(eq(goals.id, match.id));
-      const pct = Math.round((currentAmount / Number(match.targetAmount)) * 100);
-      return { result: { goalId: match.id, name: match.name, currentAmount, pct, isComplete, message: isComplete ? `🎉 Meta "${match.name}" concluída!` : `Meta "${match.name}" atualizada: ${pct}% (R$ ${currentAmount.toFixed(2)} / R$ ${Number(match.targetAmount).toFixed(2)}).` } };
+      const pct = Math.round((currentAmount / decTarget) * 100);
+      return { result: { goalId: match.id, name: decName, currentAmount, pct, isComplete, message: isComplete ? `🎉 Meta "${decName}" concluída!` : `Meta "${decName}" atualizada: ${pct}% (R$ ${currentAmount.toFixed(2)} / R$ ${decTarget.toFixed(2)}).` } };
     }
 
     // ── get_alerts ──
     case "get_alerts": {
       const rows = await db.select().from(alerts).where(and(eq(alerts.userId, userId), sql`${alerts.dismissedAt} IS NULL`));
-      return { result: rows.length > 0 ? rows : "Nenhum alerta ativo no momento." };
+      if (rows.length === 0) return { result: "Nenhum alerta ativo no momento." };
+      const decRows = rows.map(a => ({ ...a, message: safeDecrypt(a.message) }));
+      return { result: decRows };
     }
 
     // ── dismiss_alert ──
@@ -700,8 +773,18 @@ export async function executeTool(
 
     // ── get_user_profile ──
     case "get_user_profile": {
-      const profile = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
-      return { result: profile[0] ?? "Nenhum perfil configurado." };
+      const profileRows = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
+      if (!profileRows[0]) return { result: "Nenhum perfil configurado." };
+      const p = profileRows[0];
+      return {
+        result: {
+          ...p,
+          nome: safeDecrypt(p.nome),
+          rendaMensal: p.rendaMensal ? safeDecryptNumber(p.rendaMensal) : null,
+          objetivoPrincipal: p.objetivoPrincipal ? safeDecrypt(p.objetivoPrincipal) : null,
+          aiNotes: p.aiNotes ? safeDecrypt(p.aiNotes) : null,
+        },
+      };
     }
 
     // ── update_user_profile ──
@@ -710,8 +793,8 @@ export async function executeTool(
       const current = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
       if (current.length === 0) return { result: "Nenhum perfil para atualizar." };
 
-      // If ai_notes is provided, APPEND to existing (don't replace)
-      let finalNotes = current[0].aiNotes ?? "";
+      // Decrypt existing aiNotes before appending
+      let finalNotes = current[0].aiNotes ? safeDecrypt(current[0].aiNotes) : "";
       if (updates.aiNotes) {
         const today = new Date().toLocaleDateString("pt-BR");
         finalNotes = finalNotes
@@ -720,10 +803,10 @@ export async function executeTool(
       }
 
       await db.update(userProfile).set({
-        ...(updates.nome ? { nome: updates.nome } : {}),
-        ...(updates.rendaMensal ? { rendaMensal: String(updates.rendaMensal) } : {}),
-        ...(updates.objetivoPrincipal ? { objetivoPrincipal: updates.objetivoPrincipal } : {}),
-        ...(updates.aiNotes ? { aiNotes: finalNotes } : {}),
+        ...(updates.nome ? { nome: encrypt(updates.nome) } : {}),
+        ...(updates.rendaMensal ? { rendaMensal: encrypt(String(updates.rendaMensal)) } : {}),
+        ...(updates.objetivoPrincipal ? { objetivoPrincipal: encrypt(updates.objetivoPrincipal) } : {}),
+        ...(updates.aiNotes ? { aiNotes: encrypt(finalNotes) } : {}),
       }).where(and(eq(userProfile.id, current[0].id), eq(userProfile.userId, userId)));
       return { result: { message: "Perfil atualizado.", aiNotes: finalNotes } };
     }
@@ -731,24 +814,28 @@ export async function executeTool(
     // ── compare_months ──
     case "compare_months": {
       const { month1, month2 } = input as { month1: string; month2: string };
-      const rows = await db.select({
-        month: transactions.month,
-        category: transactions.category,
-        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-      }).from(transactions)
+      // Fetch raw expenses for the 2 months → decrypt → aggregate by month+category in JS
+      const rawRows = await db.select().from(transactions)
         .where(and(
           eq(transactions.userId, userId),
           eq(transactions.type, "despesa"),
           inArray(transactions.month, [month1, month2])
-        ))
-        .groupBy(transactions.month, transactions.category)
-        .orderBy(desc(sql`SUM(${transactions.amount}::numeric)`));
+        ));
+
+      // Aggregate by category+month
+      const agg: Record<string, Record<string, number>> = {};
+      for (const row of rawRows) {
+        if (!agg[row.category]) agg[row.category] = {};
+        agg[row.category][row.month] = (agg[row.category][row.month] || 0) + safeDecryptNumber(row.amount);
+      }
 
       // Pivot by category
-      const pivot: Record<string, { category: string;[key: string]: number | string }> = {};
-      for (const row of rows) {
-        if (!pivot[row.category]) pivot[row.category] = { category: row.category };
-        pivot[row.category][row.month] = Number(row.total);
+      const pivot: Record<string, { category: string; [key: string]: number | string }> = {};
+      for (const [cat, months] of Object.entries(agg)) {
+        pivot[cat] = { category: cat };
+        for (const [m, total] of Object.entries(months)) {
+          pivot[cat][m] = Math.round(total * 100) / 100;
+        }
       }
 
       const result = Object.values(pivot).map((row) => ({
@@ -763,42 +850,49 @@ export async function executeTool(
     // ── find_top_expenses ──
     case "find_top_expenses": {
       const { month, limit = 10 } = input as { month?: string; limit?: number };
-      const rows = await db.select({
-        date: transactions.date,
-        description: transactions.description,
-        beneficiary: transactions.beneficiary,
-        category: transactions.category,
-        amount: transactions.amount,
-        month: transactions.month,
-      }).from(transactions)
+      // Fetch raw → decrypt → sort by amount DESC in JS
+      const rawRows = await db.select().from(transactions)
         .where(and(
           eq(transactions.userId, userId),
           eq(transactions.type, "despesa"),
           month ? eq(transactions.month, month) : undefined,
-        ))
-        .orderBy(desc(transactions.amount))
-        .limit(limit);
-      return { result: rows };
+        ));
+      const decRows = rawRows.map(row => ({
+        date: row.date,
+        description: safeDecrypt(row.description),
+        beneficiary: safeDecrypt(row.beneficiary),
+        category: row.category,
+        amount: safeDecryptNumber(row.amount),
+        month: row.month,
+      }));
+      decRows.sort((a, b) => b.amount - a.amount);
+      return { result: decRows.slice(0, limit) };
     }
 
     // ── get_category_trend ──
     case "get_category_trend": {
       const { category } = input as { category: string };
-      const rows = await db.select({
-        month: transactions.month,
-        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-        count: sql<number>`COUNT(*)`,
-      }).from(transactions)
-        .where(and(eq(transactions.userId, userId), eq(transactions.category, category), eq(transactions.type, "despesa")))
-        .groupBy(transactions.month)
-        .orderBy(transactions.month);
+      // Fetch raw → decrypt → aggregate by month in JS
+      const rawRows = await db.select().from(transactions)
+        .where(and(eq(transactions.userId, userId), eq(transactions.category, category), eq(transactions.type, "despesa")));
+
+      const monthAgg: Record<string, { total: number; count: number }> = {};
+      for (const row of rawRows) {
+        if (!monthAgg[row.month]) monthAgg[row.month] = { total: 0, count: 0 };
+        monthAgg[row.month].total += safeDecryptNumber(row.amount);
+        monthAgg[row.month].count++;
+      }
+
+      const rows = Object.entries(monthAgg)
+        .map(([month, v]) => ({ month, total: Math.round(v.total * 100) / 100, count: v.count }))
+        .sort((a, b) => a.month.localeCompare(b.month));
 
       // Compute month-over-month change
       const withChange = rows.map((row, i) => ({
         ...row,
         prevTotal: i > 0 ? rows[i - 1].total : null,
-        change: i > 0 ? Number(row.total) - Number(rows[i - 1].total) : null,
-        changePct: i > 0 && rows[i - 1].total > 0 ? Math.round(((Number(row.total) - Number(rows[i - 1].total)) / Number(rows[i - 1].total)) * 100) : null,
+        change: i > 0 ? Math.round((row.total - rows[i - 1].total) * 100) / 100 : null,
+        changePct: i > 0 && rows[i - 1].total > 0 ? Math.round(((row.total - rows[i - 1].total) / rows[i - 1].total) * 100) : null,
       }));
       return { result: { category, trend: withChange } };
     }
@@ -862,6 +956,10 @@ export async function executeTool(
       const [tx] = await db.select().from(transactions).where(and(eq(transactions.id, transactionId), eq(transactions.userId, userId))).limit(1);
       if (!tx) return { result: { error: `Transação ${transactionId} não encontrada.` } };
 
+      // Decrypt for display and payee mapping
+      const decDescription = safeDecrypt(tx.description);
+      const decBeneficiary = safeDecrypt(tx.beneficiary);
+
       await db.update(transactions).set({
         category,
         subcategory: subcategory || null,
@@ -869,19 +967,21 @@ export async function executeTool(
       }).where(and(eq(transactions.id, transactionId), eq(transactions.userId, userId)));
 
       // Save to payeeMappings for future imports
-      if (pinPayee && tx.beneficiary) {
-        const normalized = tx.beneficiary.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
+      if (pinPayee && decBeneficiary) {
+        const normalized = normalizeBeneficiary(decBeneficiary);
         if (normalized) {
           try {
+            const hash = deterministicHash(normalized);
             await db.insert(payeeMappings).values({
               userId,
-              beneficiaryNormalized: normalized,
-              beneficiaryDisplay: tx.beneficiary,
+              beneficiaryNormalized: encrypt(normalized),
+              beneficiaryDisplay: encrypt(decBeneficiary),
+              beneficiaryHash: hash,
               category,
               subcategory: subcategory || null,
               confidence: "manual",
             }).onConflictDoUpdate({
-              target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
+              target: [payeeMappings.userId, payeeMappings.beneficiaryHash],
               set: { category, subcategory: subcategory || null, confidence: "manual", updatedAt: new Date() },
             });
           } catch (e) {
@@ -892,7 +992,7 @@ export async function executeTool(
 
       return {
         result: {
-          message: `Transação recategorizada: "${tx.description}" → ${category}${subcategory ? ` / ${subcategory}` : ""}.${pinPayee ? ` Mapeamento salvo para "${tx.beneficiary}".` : ""}`,
+          message: `Transação recategorizada: "${decDescription}" → ${category}${subcategory ? ` / ${subcategory}` : ""}.${pinPayee ? ` Mapeamento salvo para "${decBeneficiary}".` : ""}`,
         },
       };
     }
@@ -928,24 +1028,36 @@ Retorne APENAS um JSON válido (sem markdown):
 }`;
 
         const result = await identifyModel.generateContent(prompt);
+        const usage = result.response.usageMetadata;
+        if (usage?.totalTokenCount) {
+          logTokenUsage({
+            userId,
+            source: "identify_payee",
+            inputTokens: usage.promptTokenCount ?? 0,
+            outputTokens: usage.candidatesTokenCount ?? 0,
+            totalTokens: usage.totalTokenCount ?? 0,
+          });
+        }
         const text = result.response.text();
 
         const parsed = JSON.parse(text.replace(/```json?\n?/g, "").replace(/```/g, "").trim());
 
         // Save to payeeMappings for future use
         if (beneficiary && parsed.confidence === "high") {
-          const normalized = beneficiary.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
+          const normalized = normalizeBeneficiary(beneficiary);
           if (normalized) {
             try {
+              const hash = deterministicHash(normalized);
               await db.insert(payeeMappings).values({
                 userId,
-                beneficiaryNormalized: normalized,
-                beneficiaryDisplay: beneficiary,
+                beneficiaryNormalized: encrypt(normalized),
+                beneficiaryDisplay: encrypt(beneficiary),
+                beneficiaryHash: hash,
                 category: parsed.suggested_category,
                 subcategory: parsed.suggested_subcategory || null,
                 confidence: "ai",
               }).onConflictDoUpdate({
-                target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
+                target: [payeeMappings.userId, payeeMappings.beneficiaryHash],
                 set: {
                   category: parsed.suggested_category,
                   subcategory: parsed.suggested_subcategory || null,
@@ -995,94 +1107,75 @@ Retorne APENAS um JSON válido (sem markdown):
       const bPrev1 = prevMFn(curMonth);
       const bPrev2 = prevMFn(bPrev1);
       const analysisMonths = [curMonth, bPrev1, bPrev2];
-      const monthsIn = sql.join(analysisMonths.map(m => sql`${m}`), sql`, `);
 
-      const [weekendRows, recurringRows, categoryMomRows, impulseRows] = await Promise.all([
-        // 1. Weekend vs weekday
-        db.execute(sql`
-          SELECT
-            CASE WHEN EXTRACT(DOW FROM date::date) IN (0, 6) THEN 'weekend' ELSE 'weekday' END AS day_type,
-            ROUND(SUM(amount::numeric), 2) AS total,
-            COUNT(*) AS count
-          FROM ff_transactions
-          WHERE user_id = ${userId}
-            AND type = 'despesa'
-            AND month IN (${monthsIn})
-          GROUP BY day_type
-        `),
+      // Fetch all expenses for the analysis months, decrypt in JS
+      const rawExpenses = await db.select().from(transactions)
+        .where(and(
+          eq(transactions.userId, userId),
+          eq(transactions.type, "despesa"),
+          inArray(transactions.month, analysisMonths),
+        ));
 
-        // 2. Recurring beneficiaries (subscription creep)
-        db.execute(sql`
-          SELECT beneficiary,
-            MAX(category) AS category,
-            ROUND(AVG(amount::numeric), 2) AS avg_amount,
-            COUNT(DISTINCT month) AS month_count
-          FROM ff_transactions
-          WHERE user_id = ${userId}
-            AND type = 'despesa'
-            AND month IN (${monthsIn})
-          GROUP BY beneficiary
-          HAVING COUNT(DISTINCT month) >= 2
-          ORDER BY avg_amount DESC
-          LIMIT 15
-        `),
+      const decExpenses = rawExpenses.map(row => ({
+        id: row.id,
+        date: row.date,
+        description: safeDecrypt(row.description),
+        beneficiary: safeDecrypt(row.beneficiary),
+        category: row.category,
+        amount: safeDecryptNumber(row.amount),
+        month: row.month,
+      }));
 
-        // 3. Category MoM for status anxiety detection
-        db.execute(sql`
-          SELECT category, month, ROUND(SUM(amount::numeric), 2) AS total
-          FROM ff_transactions
-          WHERE user_id = ${userId}
-            AND type = 'despesa'
-            AND month IN (${monthsIn})
-          GROUP BY category, month
-          ORDER BY category, month
-        `),
-
-        // 4. Impulse: transactions > 2× avg for their category AND > R$50
-        db.execute(sql`
-          SELECT t.id, t.date, t.description, t.beneficiary, t.category, t.amount, t.month,
-            cat_avg.avg_amount
-          FROM ff_transactions t
-          JOIN (
-            SELECT category, ROUND(AVG(amount::numeric), 2) AS avg_amount
-            FROM ff_transactions
-            WHERE user_id = ${userId} AND type = 'despesa' AND month IN (${monthsIn})
-            GROUP BY category
-          ) cat_avg ON t.category = cat_avg.category
-          WHERE t.user_id = ${userId}
-            AND t.type = 'despesa'
-            AND t.month IN (${monthsIn})
-            AND t.amount::numeric > cat_avg.avg_amount * 2.0
-            AND t.amount::numeric > 50
-          ORDER BY t.amount::numeric DESC
-          LIMIT 10
-        `),
-      ]);
-
-      type WRow = { day_type: string; total: string; count: string };
-      const wData = weekendRows.rows as WRow[];
-      const wkEnd = wData.find(r => r.day_type === "weekend");
-      const wkDay = wData.find(r => r.day_type === "weekday");
-      const wkEndAvgPerDay = wkEnd ? Number(wkEnd.total) / (analysisMonths.length * 8) : 0;
-      const wkDayAvgPerDay = wkDay ? Number(wkDay.total) / (analysisMonths.length * 22) : 0;
+      // 1. Weekend vs weekday
+      let weekendTotal = 0, weekendCount = 0, weekdayTotal = 0, weekdayCount = 0;
+      for (const tx of decExpenses) {
+        const d = new Date(tx.date);
+        const dow = d.getUTCDay();
+        if (dow === 0 || dow === 6) {
+          weekendTotal += tx.amount;
+          weekendCount++;
+        } else {
+          weekdayTotal += tx.amount;
+          weekdayCount++;
+        }
+      }
+      const wkEndAvgPerDay = weekendTotal > 0 ? weekendTotal / (analysisMonths.length * 8) : 0;
+      const wkDayAvgPerDay = weekdayTotal > 0 ? weekdayTotal / (analysisMonths.length * 22) : 0;
       const weekendPremiumPct = wkDayAvgPerDay > 0
         ? Math.round(((wkEndAvgPerDay - wkDayAvgPerDay) / wkDayAvgPerDay) * 100) : 0;
 
-      type RRow = { beneficiary: string; category: string; avg_amount: string; month_count: string };
-      const rData = recurringRows.rows as RRow[];
+      // 2. Recurring beneficiaries (subscription creep)
+      const benMap: Record<string, { category: string; months: Set<string>; amounts: number[] }> = {};
+      for (const tx of decExpenses) {
+        if (!benMap[tx.beneficiary]) benMap[tx.beneficiary] = { category: tx.category, months: new Set(), amounts: [] };
+        benMap[tx.beneficiary].months.add(tx.month);
+        benMap[tx.beneficiary].amounts.push(tx.amount);
+        benMap[tx.beneficiary].category = tx.category;
+      }
+      const rData = Object.entries(benMap)
+        .filter(([, v]) => v.months.size >= 2)
+        .map(([beneficiary, v]) => ({
+          beneficiary,
+          category: v.category,
+          avg_amount: Math.round((v.amounts.reduce((s, a) => s + a, 0) / v.amounts.length) * 100) / 100,
+          month_count: v.months.size,
+        }))
+        .sort((a, b) => b.avg_amount - a.avg_amount)
+        .slice(0, 15);
+
       const subscriptionCats = ["streaming", "assinatura", "software", "internet", "telefonia"];
       const confirmedSubscriptions = rData.filter(r =>
         subscriptionCats.some(sc => (r.category ?? "").toLowerCase().includes(sc))
       );
-      const subscriptionTotal = confirmedSubscriptions.reduce((s, r) => s + Number(r.avg_amount), 0);
+      const subscriptionTotal = confirmedSubscriptions.reduce((s, r) => s + r.avg_amount, 0);
 
-      type CRow = { category: string; month: string; total: string };
-      const cData = categoryMomRows.rows as CRow[];
+      // 3. Category MoM for status anxiety detection
       const catMonthMap: Record<string, Record<string, number>> = {};
-      for (const row of cData) {
-        if (!catMonthMap[row.category]) catMonthMap[row.category] = {};
-        catMonthMap[row.category][row.month] = Number(row.total);
+      for (const tx of decExpenses) {
+        if (!catMonthMap[tx.category]) catMonthMap[tx.category] = {};
+        catMonthMap[tx.category][tx.month] = (catMonthMap[tx.category][tx.month] || 0) + tx.amount;
       }
+
       const statusCats = ["Vestuário", "Beleza", "Eletrônicos", "Lazer"];
       const statusAnxietySignals = statusCats
         .map(cat => {
@@ -1098,9 +1191,26 @@ Retorne APENAS um JSON válido (sem markdown):
         .filter(s => s!.pctAboveAvg > 30 && s!.recent > 50)
         .sort((a, b) => b!.pctAboveAvg - a!.pctAboveAvg);
 
+      // 4. Impulse: transactions > 2× avg for their category AND > R$50
+      // Compute category averages
+      const catAvg: Record<string, number> = {};
+      const catCount: Record<string, number> = {};
+      for (const tx of decExpenses) {
+        catAvg[tx.category] = (catAvg[tx.category] || 0) + tx.amount;
+        catCount[tx.category] = (catCount[tx.category] || 0) + 1;
+      }
+      for (const cat of Object.keys(catAvg)) {
+        catAvg[cat] = catAvg[cat] / catCount[cat];
+      }
+      const impulseTransactions = decExpenses
+        .filter(tx => tx.amount > (catAvg[tx.category] || 0) * 2.0 && tx.amount > 50)
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 10)
+        .map(tx => ({ ...tx, avg_amount: Math.round((catAvg[tx.category] || 0) * 100) / 100 }));
+
       const dominantBias = weekendPremiumPct > 40 ? "weekend_pattern"
         : statusAnxietySignals.length > 0 ? "status_anxiety"
-        : (impulseRows.rows as unknown[]).length >= 3 ? "impulse_buying"
+        : impulseTransactions.length >= 3 ? "impulse_buying"
         : subscriptionTotal > 200 ? "subscription_creep"
         : "none_detected";
 
@@ -1108,8 +1218,8 @@ Retorne APENAS um JSON válido (sem markdown):
         result: {
           analysisMonths,
           weekendPattern: {
-            weekendSpend: wkEnd ? Number(wkEnd.total) : 0,
-            weekdaySpend: wkDay ? Number(wkDay.total) : 0,
+            weekendSpend: Math.round(weekendTotal * 100) / 100,
+            weekdaySpend: Math.round(weekdayTotal * 100) / 100,
             weekendAvgPerDay: Math.round(wkEndAvgPerDay * 100) / 100,
             weekdayAvgPerDay: Math.round(wkDayAvgPerDay * 100) / 100,
             weekendPremiumPct,
@@ -1122,7 +1232,7 @@ Retorne APENAS um JSON válido (sem markdown):
             signal: subscriptionTotal > 200 ? "HIGH" : subscriptionTotal > 100 ? "MEDIUM" : "LOW",
           },
           statusAnxietySignals,
-          impulseTransactions: impulseRows.rows,
+          impulseTransactions,
           dominantBias,
         },
       };
@@ -1145,42 +1255,53 @@ Retorne APENAS um JSON válido (sem markdown):
       const cPrev2 = prevMFn2(cPrev1);
       const cPrev3 = prevMFn2(cPrev2);
 
-      const [incomeSummary, recurringQ, activeGoals2, currentExpenses] = await Promise.all([
-        db.select({ total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)` })
-          .from(transactions)
+      const [incomeRows, recurringTxRows2, activeGoals2, currentExpenseRows] = await Promise.all([
+        // Income for current month
+        db.select().from(transactions)
           .where(and(eq(transactions.userId, userId), eq(transactions.month, curMonth), eq(transactions.type, "receita"))),
 
-        db.select({
-          beneficiary: transactions.beneficiary,
-          category: sql<string>`MAX(${transactions.category})`,
-          avgAmount: sql<number>`ROUND(AVG(${transactions.amount}::numeric), 2)`,
-          monthCount: sql<number>`COUNT(DISTINCT ${transactions.month})`,
-        })
-          .from(transactions)
+        // Expenses for last 3 months (for recurring detection)
+        db.select().from(transactions)
           .where(and(
             eq(transactions.userId, userId),
             inArray(transactions.month, [cPrev1, cPrev2, cPrev3]),
             eq(transactions.type, "despesa"),
-          ))
-          .groupBy(transactions.beneficiary)
-          .having(sql`COUNT(DISTINCT ${transactions.month}) >= 2`)
-          .orderBy(desc(sql`AVG(${transactions.amount}::numeric)`)),
+          )),
 
+        // Active goals
         db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.status, "active"))),
 
-        db.select({
-          beneficiary: transactions.beneficiary,
-          total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-        })
-          .from(transactions)
-          .where(and(eq(transactions.userId, userId), eq(transactions.month, curMonth), eq(transactions.type, "despesa")))
-          .groupBy(transactions.beneficiary),
+        // Current month expenses
+        db.select().from(transactions)
+          .where(and(eq(transactions.userId, userId), eq(transactions.month, curMonth), eq(transactions.type, "despesa"))),
       ]);
 
-      const receitas2 = Number(incomeSummary[0]?.total ?? 0);
-      const recurringBens = new Set(recurringQ.map(r => r.beneficiary));
-      const estimatedRec = recurringQ.reduce((s, r) => s + Number(r.avgAmount), 0);
+      // Income: decrypt and sum
+      const receitas2 = Math.round(incomeRows.reduce((s, r) => s + safeDecryptNumber(r.amount), 0) * 100) / 100;
 
+      // Recurring: decrypt, group by decrypted beneficiary, filter ≥2 months
+      const recBenMap: Record<string, { category: string; months: Set<string>; amounts: number[] }> = {};
+      for (const row of recurringTxRows2) {
+        const ben = safeDecrypt(row.beneficiary);
+        if (!recBenMap[ben]) recBenMap[ben] = { category: row.category, months: new Set(), amounts: [] };
+        recBenMap[ben].months.add(row.month);
+        recBenMap[ben].amounts.push(safeDecryptNumber(row.amount));
+        recBenMap[ben].category = row.category;
+      }
+      const recurringQ = Object.entries(recBenMap)
+        .filter(([, v]) => v.months.size >= 2)
+        .map(([beneficiary, v]) => ({
+          beneficiary,
+          category: v.category,
+          avgAmount: Math.round((v.amounts.reduce((s, a) => s + a, 0) / v.amounts.length) * 100) / 100,
+          monthCount: v.months.size,
+        }))
+        .sort((a, b) => b.avgAmount - a.avgAmount);
+
+      const recurringBens = new Set(recurringQ.map(r => r.beneficiary));
+      const estimatedRec = recurringQ.reduce((s, r) => s + r.avgAmount, 0);
+
+      // Goals: decrypt amounts for contribution calculation
       const goalContrib2 = activeGoals2
         .filter(g => g.deadline)
         .reduce((sum, g) => {
@@ -1189,12 +1310,18 @@ Retorne APENAS um JSON válido (sem markdown):
             (deadline.getFullYear() - now.getFullYear()) * 12 +
             (deadline.getMonth() - now.getMonth())
           );
-          return sum + Math.max(0, Number(g.targetAmount) - Number(g.currentAmount)) / monthsLeft;
+          return sum + Math.max(0, safeDecryptNumber(g.targetAmount) - safeDecryptNumber(g.currentAmount)) / monthsLeft;
         }, 0);
 
-      const varSpent2 = currentExpenses
-        .filter(r => !recurringBens.has(r.beneficiary))
-        .reduce((s, r) => s + Number(r.total), 0);
+      // Current month expenses: decrypt, group by beneficiary, separate recurring vs variable
+      const curExpBenMap: Record<string, number> = {};
+      for (const row of currentExpenseRows) {
+        const ben = safeDecrypt(row.beneficiary);
+        curExpBenMap[ben] = (curExpBenMap[ben] || 0) + safeDecryptNumber(row.amount);
+      }
+      const varSpent2 = Object.entries(curExpBenMap)
+        .filter(([ben]) => !recurringBens.has(ben))
+        .reduce((s, [, total]) => s + total, 0);
 
       const committedTotal2 = estimatedRec + goalContrib2;
       const committedPct2 = receitas2 > 0 ? Math.round((committedTotal2 / receitas2) * 100) : 0;
@@ -1206,7 +1333,7 @@ Retorne APENAS um JSON válido (sem markdown):
       const taggedItems = recurringQ.map(r => ({
         beneficiary: r.beneficiary,
         category: r.category ?? "Outros",
-        avgAmount: Number(r.avgAmount),
+        avgAmount: r.avgAmount,
         tag: subKeywords.some(k => r.beneficiary.toLowerCase().includes(k)) ||
           (r.category ?? "").toLowerCase().includes("assinatura") ||
           (r.category ?? "").toLowerCase().includes("streaming")
@@ -1243,21 +1370,19 @@ Retorne APENAS um JSON válido (sem markdown):
       const now = new Date();
       const mNames = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
-      const summaryRows = await db.select({
-        month: transactions.month,
-        type: transactions.type,
-        total: sql<number>`ROUND(SUM(${transactions.amount}::numeric), 2)`,
-      })
-        .from(transactions)
-        .where(eq(transactions.userId, userId))
-        .groupBy(transactions.month, transactions.type)
-        .orderBy(desc(transactions.month))
-        .limit(12);
+      // Fetch all transactions → decrypt → aggregate by month+type in JS
+      const rawRows = await db.select().from(transactions)
+        .where(eq(transactions.userId, userId));
 
       const mMap: Record<string, { receitas: number; despesas: number }> = {};
-      for (const row of summaryRows) {
+      for (const row of rawRows) {
         if (!mMap[row.month]) mMap[row.month] = { receitas: 0, despesas: 0 };
-        mMap[row.month][row.type === "receita" ? "receitas" : "despesas"] = Number(row.total);
+        mMap[row.month][row.type === "receita" ? "receitas" : "despesas"] += safeDecryptNumber(row.amount);
+      }
+      // Round
+      for (const v of Object.values(mMap)) {
+        v.receitas = Math.round(v.receitas * 100) / 100;
+        v.despesas = Math.round(v.despesas * 100) / 100;
       }
 
       const recentMonths = Object.entries(mMap)
@@ -1274,6 +1399,7 @@ Retorne APENAS um JSON válido (sem markdown):
       const avgSaldo = avgReceitas - avgDespesas;
       const savingsRate = avgReceitas > 0 ? avgSaldo / avgReceitas : 0;
 
+      // Goals: decrypt amounts
       const activeGoals3 = await db.select().from(goals)
         .where(and(eq(goals.userId, userId), eq(goals.status, "active")));
 
@@ -1291,15 +1417,18 @@ Retorne APENAS um JSON válido (sem markdown):
       }
 
       const goalProjections = activeGoals3.map(g => {
-        const remaining = Math.max(0, Number(g.targetAmount) - Number(g.currentAmount));
+        const decTarget = safeDecryptNumber(g.targetAmount);
+        const decCurrent = safeDecryptNumber(g.currentAmount);
+        const decName = safeDecrypt(g.name);
+        const remaining = Math.max(0, decTarget - decCurrent);
         if (avgSaldo <= 0) {
-          return { goalName: g.name, monthsToReach: null, message: "Saldo médio negativo — meta não atingível nesse ritmo." };
+          return { goalName: decName, monthsToReach: null, message: "Saldo médio negativo — meta não atingível nesse ritmo." };
         }
         const monthsToReach = Math.ceil(remaining / avgSaldo);
         const targetDate = new Date(now.getFullYear(), now.getMonth() + monthsToReach, 1);
         const projectedMonth = `${mNames[targetDate.getMonth()]}/${String(targetDate.getFullYear()).slice(2)}`;
         return {
-          goalName: g.name,
+          goalName: decName,
           remaining: Math.round(remaining * 100) / 100,
           monthsToReach,
           projectedCompletionMonth: projectedMonth,

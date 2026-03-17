@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { payeeNotes } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, safeDecrypt } from "@/lib/encryption";
 
 export async function GET() {
   const authResult = await requireAuth();
@@ -15,7 +16,8 @@ export async function GET() {
       .from(payeeNotes)
       .where(eq(payeeNotes.userId, userId))
       .orderBy(desc(payeeNotes.createdAt));
-    return NextResponse.json({ notes: rows });
+    const decrypted = rows.map(r => ({ ...r, note: safeDecrypt(r.note) }));
+    return NextResponse.json({ notes: decrypted });
   } catch (err) {
     console.error("Payee notes GET error:", err);
     return NextResponse.json({ error: "Erro ao carregar notas." }, { status: 500 });
@@ -32,8 +34,8 @@ export async function POST(req: NextRequest) {
     if (!note?.trim()) {
       return NextResponse.json({ error: "note é obrigatório." }, { status: 400 });
     }
-    const [inserted] = await db.insert(payeeNotes).values({ userId, note: note.trim() }).returning();
-    return NextResponse.json({ note: inserted });
+    const [inserted] = await db.insert(payeeNotes).values({ userId, note: encrypt(note.trim()) }).returning();
+    return NextResponse.json({ note: { ...inserted, note: note.trim() } });
   } catch (err) {
     console.error("Payee notes POST error:", err);
     return NextResponse.json({ error: "Erro ao salvar nota." }, { status: 500 });

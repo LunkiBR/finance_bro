@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { chatMessages, conversations } from "@/db/schema";
 import { desc, eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { safeDecrypt, isEncrypted, decrypt } from "@/lib/encryption";
 
 export async function GET(
     _req: NextRequest,
@@ -33,7 +34,19 @@ export async function GET(
             .orderBy(desc(chatMessages.createdAt))
             .limit(100);
 
-        return Response.json(messages.reverse());
+        const decrypted = messages.map(m => {
+            let chartSpec = m.chartSpec;
+            if (typeof chartSpec === "string" && isEncrypted(chartSpec)) {
+                try { chartSpec = JSON.parse(decrypt(chartSpec)); } catch { /* keep as-is */ }
+            }
+            return {
+                ...m,
+                content: safeDecrypt(m.content),
+                chartSpec,
+            };
+        });
+
+        return Response.json(decrypted.reverse());
     } catch (err) {
         console.error("Messages GET error:", err);
         return Response.json([]);

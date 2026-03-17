@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { userProfile } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, encryptNumber } from "@/lib/encryption";
 
 export async function POST(req: NextRequest) {
     const authResult = await requireAuth();
@@ -13,11 +14,11 @@ export async function POST(req: NextRequest) {
 
         await db.insert(userProfile).values({
             userId,
-            nome: body.nome,
-            rendaMensal: body.rendaMensal || null,
-            dividaMensal: body.dividaMensal || null,
+            nome: encrypt(body.nome),
+            rendaMensal: body.rendaMensal ? encryptNumber(Number(body.rendaMensal)) : null,
+            dividaMensal: body.dividaMensal ? encryptNumber(Number(body.dividaMensal)) : null,
             bancoPrincipal: body.bancoPrincipal || null,
-            objetivoPrincipal: body.objetivoPrincipal || null,
+            objetivoPrincipal: body.objetivoPrincipal ? encrypt(body.objetivoPrincipal) : null,
             temReserva: body.temReserva || null,
             categoriasAltas: body.categoriasAltas || [],
             onboardingCompleto: true,

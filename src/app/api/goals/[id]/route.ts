@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goals } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encryptNumber, safeDecryptNumber } from "@/lib/encryption";
 
 export async function PATCH(
     req: NextRequest,
@@ -17,12 +18,19 @@ export async function PATCH(
         const body = await req.json();
 
         if (body.addAmount) {
-            await db
-                .update(goals)
-                .set({
-                    currentAmount: sql`${goals.currentAmount}::numeric + ${body.addAmount}::numeric`,
-                })
-                .where(and(eq(goals.id, id), eq(goals.userId, userId)));
+            // Fetch → decrypt → add → encrypt → update
+            const [row] = await db.select({ currentAmount: goals.currentAmount })
+                .from(goals)
+                .where(and(eq(goals.id, id), eq(goals.userId, userId)))
+                .limit(1);
+            if (row) {
+                const current = safeDecryptNumber(row.currentAmount);
+                const newAmount = current + Number(body.addAmount);
+                await db
+                    .update(goals)
+                    .set({ currentAmount: encryptNumber(newAmount) })
+                    .where(and(eq(goals.id, id), eq(goals.userId, userId)));
+            }
         }
 
         if (body.status) {

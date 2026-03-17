@@ -5,6 +5,8 @@ import { chatMessages, conversations, userProfile } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import type { ChartSpec } from "@/lib/chart-types";
 import { requireAuth } from "@/lib/auth-guard";
+import { TokenAccumulator, logTokenUsage } from "@/lib/token-tracking";
+import { encrypt, safeDecrypt, isEncrypted, decrypt } from "@/lib/encryption";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
             userId,
             conversationId: convId,
             role: "user",
-            content: message,
+            content: encrypt(message),
           });
         } catch (dbErr) {
           console.error("Chat: falha ao salvar mensagem do usuário:", dbErr);
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest) {
 
         // Fetch user info for personalization
         const profileInfo = await db.select().from(userProfile).where(eq(userProfile.userId, userId)).limit(1);
-        const userName = profileInfo[0]?.nome || "usuário";
+        const userName = profileInfo[0]?.nome ? safeDecrypt(profileInfo[0].nome) : "usuário";
         const systemPrompt = await getSystemPrompt(userName, userId);
 
         // Build context snapshot (live financial state)
@@ -109,7 +111,7 @@ export async function POST(req: NextRequest) {
           .map((m) => ({
             role: (m.role === "user" ? "user" : "model") as "user" | "model",
             // Guard against empty text — Gemini rejects empty parts
-            parts: [{ text: m.content || " " }],
+            parts: [{ text: safeDecrypt(m.content) || " " }],
           }));
 
         // Repair history: remove consecutive same-role turns and orphaned trailing user messages.
@@ -139,6 +141,7 @@ export async function POST(req: NextRequest) {
 
         let continueLoop = true;
         let iterations = 0;
+        const tokenAcc = new TokenAccumulator();
 
         while (continueLoop) {
           iterations++;
@@ -160,6 +163,9 @@ export async function POST(req: NextRequest) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             lastParts as any
           );
+
+          // Capture token usage from this iteration
+          tokenAcc.add(response.response.usageMetadata);
 
           const functionCalls = (response.response.functionCalls() ?? []).filter((fc) => fc);
 
@@ -243,9 +249,9 @@ export async function POST(req: NextRequest) {
             userId,
             conversationId: convId,
             role: "assistant",
-            content: fullResponse,
+            content: encrypt(fullResponse),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            chartSpec: chartSpecs.length > 0 ? (chartSpecs as any) : null,
+            chartSpec: chartSpecs.length > 0 ? encrypt(JSON.stringify(chartSpecs)) : null,
           });
 
           // Atualiza updated_at da conversa
@@ -266,6 +272,18 @@ export async function POST(req: NextRequest) {
           }
         } catch (dbErr) {
           console.error("Chat: falha ao salvar resposta:", dbErr);
+        }
+
+        // Log accumulated token usage for this request
+        if (tokenAcc.totalTokens > 0) {
+          logTokenUsage({
+            userId,
+            source: "chat",
+            inputTokens: tokenAcc.inputTokens,
+            outputTokens: tokenAcc.outputTokens,
+            totalTokens: tokenAcc.totalTokens,
+            conversationId: convId ?? undefined,
+          });
         }
 
         await writer.write(
@@ -359,7 +377,14 @@ export async function GET() {
       .orderBy(desc(chatMessages.createdAt))
       .limit(50);
 
-    return new Response(JSON.stringify(history.reverse()), {
+    const decrypted = history.map(m => {
+      let chartSpec = m.chartSpec;
+      if (typeof chartSpec === "string" && isEncrypted(chartSpec)) {
+        try { chartSpec = JSON.parse(decrypt(chartSpec)); } catch { /* keep */ }
+      }
+      return { ...m, content: safeDecrypt(m.content), chartSpec };
+    });
+    return new Response(JSON.stringify(decrypted.reverse()), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {

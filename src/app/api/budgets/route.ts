@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { budgets, transactions } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encryptNumber, safeDecryptNumber } from "@/lib/encryption";
 
 export async function DELETE(req: NextRequest) {
     const authResult = await requireAuth();
@@ -37,34 +38,42 @@ export async function GET(req: NextRequest) {
             .from(budgets)
             .where(and(...conditions));
 
-        const enriched = await Promise.all(
-            rows.map(async (b) => {
-                const [spentResult] = await db
-                    .select({
-                        total: sql<number>`COALESCE(ROUND(SUM(${transactions.amount}::numeric), 2), 0)`,
-                        count: sql<number>`COUNT(*)`,
-                    })
-                    .from(transactions)
-                    .where(
-                        and(
-                            eq(transactions.userId, userId),
-                            eq(transactions.category, b.category),
-                            eq(transactions.month, b.month),
-                            eq(transactions.type, "despesa")
-                        )
-                    );
+        // Fetch all expense transactions for the relevant months to compute spent in JS
+        const months = [...new Set(rows.map(b => b.month))];
+        let allExpenses: { category: string; month: string; amount: string }[] = [];
+        if (months.length > 0) {
+            const txRows = await db
+                .select({
+                    category: transactions.category,
+                    month: transactions.month,
+                    amount: transactions.amount,
+                })
+                .from(transactions)
+                .where(and(
+                    eq(transactions.userId, userId),
+                    eq(transactions.type, "despesa")
+                ));
+            allExpenses = txRows.filter(t => months.includes(t.month));
+        }
 
-                const spent = spentResult?.total || 0;
-                const limit = Number(b.limitAmount);
-                return {
-                    ...b,
-                    spent,
-                    limit,
-                    pct: limit > 0 ? Math.round((spent / limit) * 100) : 0,
-                    txCount: spentResult?.count || 0,
-                };
-            })
-        );
+        const enriched = rows.map((b) => {
+            // Sum expenses for this budget's category+month in JS
+            const spent = allExpenses
+                .filter(t => t.category === b.category && t.month === b.month)
+                .reduce((s, t) => s + safeDecryptNumber(t.amount), 0);
+            const spentRounded = Math.round(spent * 100) / 100;
+
+            const limit = safeDecryptNumber(b.limitAmount);
+            return {
+                ...b,
+                limitAmount: String(limit),
+                spentAmount: String(spentRounded),
+                spent: spentRounded,
+                limit,
+                pct: limit > 0 ? Math.round((spentRounded / limit) * 100) : 0,
+                txCount: allExpenses.filter(t => t.category === b.category && t.month === b.month).length,
+            };
+        });
 
         return NextResponse.json(enriched);
     } catch (err) {
@@ -85,7 +94,7 @@ export async function POST(req: NextRequest) {
             userId,
             category: body.category,
             month: body.month,
-            limitAmount: body.limitAmount,
+            limitAmount: encryptNumber(Number(body.limitAmount)),
         });
 
         return NextResponse.json({ success: true });

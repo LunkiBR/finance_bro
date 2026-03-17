@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { transactions, payeeMappings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-guard";
+import { encrypt, safeDecrypt, deterministicHash } from "@/lib/encryption";
 
 function normalizeBeneficiary(raw: string): string {
   return (raw || "")
@@ -42,7 +43,7 @@ export async function PATCH(
       updates.subcategory = body.subcategory;
     }
     if (body.beneficiary !== undefined) {
-      updates.beneficiary = body.beneficiary;
+      updates.beneficiary = encrypt(body.beneficiary);
     }
 
     await db
@@ -58,19 +59,22 @@ export async function PATCH(
         .limit(1);
 
       if (tx?.beneficiary) {
-        const normalized = normalizeBeneficiary(tx.beneficiary);
+        const plainBeneficiary = safeDecrypt(tx.beneficiary);
+        const normalized = normalizeBeneficiary(plainBeneficiary);
+        const hash = deterministicHash(normalized);
         await db
           .insert(payeeMappings)
           .values({
             userId,
-            beneficiaryNormalized: normalized,
-            beneficiaryDisplay: tx.beneficiary,
+            beneficiaryNormalized: encrypt(normalized),
+            beneficiaryDisplay: encrypt(plainBeneficiary),
+            beneficiaryHash: hash,
             category: body.category,
             subcategory: body.subcategory || null,
             confidence: "manual",
           })
           .onConflictDoUpdate({
-            target: [payeeMappings.userId, payeeMappings.beneficiaryNormalized],
+            target: [payeeMappings.userId, payeeMappings.beneficiaryHash],
             set: {
               category: body.category,
               subcategory: body.subcategory || null,

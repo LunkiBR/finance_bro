@@ -3,7 +3,7 @@ import {
   uuid,
   text,
   date,
-  numeric,
+
   integer,
   serial,
   jsonb,
@@ -69,10 +69,11 @@ export const transactions = pgTable("ff_transactions", {
   category: text("category").notNull().default("Outros"),
   subcategory: text("subcategory"),
   type: transactionTypeEnum("type").notNull(),
-  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  amount: text("amount").notNull(),
   source: text("source").notNull().default("nubank_cc"),
   month: text("month").notNull(),
   rawLine: text("raw_line"),
+  descriptionHash: text("description_hash").notNull().default(""),
   categoryConfidence: categoryConfidenceEnum("category_confidence").default("high"),
   ruleIdApplied: uuid("rule_id_applied"),
   isManuallyEdited: boolean("is_manually_edited").notNull().default(false),
@@ -112,10 +113,8 @@ export const budgets = pgTable("ff_budgets", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   category: text("category").notNull(),
   month: text("month").notNull(),
-  limitAmount: numeric("limit_amount", { precision: 10, scale: 2 }).notNull(),
-  spentAmount: numeric("spent_amount", { precision: 10, scale: 2 })
-    .notNull()
-    .default("0"),
+  limitAmount: text("limit_amount").notNull(),
+  spentAmount: text("spent_amount").notNull().default("0"),
 });
 
 // ─── Metas ────────────────────────────────────────────────────────────────────
@@ -124,10 +123,8 @@ export const goals = pgTable("ff_goals", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  targetAmount: numeric("target_amount", { precision: 10, scale: 2 }).notNull(),
-  currentAmount: numeric("current_amount", { precision: 10, scale: 2 })
-    .notNull()
-    .default("0"),
+  targetAmount: text("target_amount").notNull(),
+  currentAmount: text("current_amount").notNull().default("0"),
   deadline: date("deadline"),
   status: goalStatusEnum("status").notNull().default("active"),
 });
@@ -174,8 +171,8 @@ export const userProfile = pgTable("ff_user_profile", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   nome: text("nome").notNull(),
-  rendaMensal: numeric("renda_mensal", { precision: 10, scale: 2 }),
-  dividaMensal: numeric("divida_mensal", { precision: 10, scale: 2 }),
+  rendaMensal: text("renda_mensal"),
+  dividaMensal: text("divida_mensal"),
   bancoPrincipal: text("banco_principal"),
   objetivoPrincipal: text("objetivo_principal"),
   temReserva: text("tem_reserva"),
@@ -195,6 +192,7 @@ export const payeeMappings = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     beneficiaryNormalized: text("beneficiary_normalized").notNull(),
     beneficiaryDisplay: text("beneficiary_display"),
+    beneficiaryHash: text("beneficiary_hash").notNull().default(""),
     category: text("category").notNull(),
     subcategory: text("subcategory"),
     confidence: text("confidence").notNull().default("ai"),
@@ -202,7 +200,7 @@ export const payeeMappings = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("uq_payee_per_user").on(table.userId, table.beneficiaryNormalized),
+    uniqueIndex("uq_payee_per_user_hash").on(table.userId, table.beneficiaryHash),
   ]
 );
 
@@ -253,6 +251,21 @@ export const aiSummaries = pgTable("ff_ai_summaries", {
   generatedAt: timestamp("generated_at").defaultNow().notNull(),
 });
 
+// ─── Token Usage (AI cost tracking) ─────────────────────────────────────────
+
+export const tokenUsage = pgTable("ff_token_usage", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  source: varchar("source", { length: 30 }).notNull(), // "chat" | "identify_payee"
+  model: varchar("model", { length: 50 }).notNull().default("gemini-2.5-flash"),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+  costUsd: text("cost_usd").notNull().default("0"),
+  conversationId: uuid("conversation_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ─── TypeScript Types ─────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -275,3 +288,5 @@ export type NewUserCategoryRule = typeof userCategoryRules.$inferInsert;
 export type AiSummary = typeof aiSummaries.$inferSelect;
 export type UserCategory = typeof userCategories.$inferSelect;
 export type NewUserCategory = typeof userCategories.$inferInsert;
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+export type NewTokenUsage = typeof tokenUsage.$inferInsert;

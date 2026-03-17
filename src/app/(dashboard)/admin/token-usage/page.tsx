@@ -222,7 +222,7 @@ export default function TokenUsagePage() {
                   width={55}
                 />
                 <Tooltip
-                  formatter={(v: number) => [`R$ ${v.toFixed(4)}`, "Custo"]}
+                  formatter={(v: number | undefined) => [`R$ ${(v ?? 0).toFixed(4)}`, "Custo"]}
                   labelFormatter={(l) => {
                     const [, , d] = l.split("-");
                     return `Dia ${parseInt(d)}`;

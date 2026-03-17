@@ -2,23 +2,31 @@ import { db } from "@/db";
 import { tokenUsage } from "@/db/schema";
 
 // ─── Pricing (USD per 1M tokens) ─────────────────────────────────────────────
-// Gemini 2.5 Flash: $0.15 input, $0.60 output (used by chat + identify_payee)
-// GPT-4o-mini:      $0.15 input, $0.60 output (used by n8n categorization — tracked in n8n directly)
-const INPUT_PRICE_PER_1M = 0.15;
-const OUTPUT_PRICE_PER_1M = 0.60;
+// Gemini 2.5 Flash: used for chat + identify_payee (copiloto)
+const GEMINI_FLASH_INPUT  = 0.15;   // $0.15 / 1M input tokens
+const GEMINI_FLASH_OUTPUT = 3.50;   // $3.50 / 1M output tokens
+
+// GPT-4o-mini: used for n8n_categorize (categorização via n8n)
+const GPT4O_MINI_INPUT  = 0.150;    // $0.150 / 1M input tokens
+const GPT4O_MINI_OUTPUT = 0.600;    // $0.600 / 1M output tokens
 
 // ─── Exchange rate ───────────────────────────────────────────────────────────
 export const USD_TO_BRL = 5.70;
 
-// ─── Cost calculation ────────────────────────────────────────────────────────
+// ─── Cost calculation (source-aware) ─────────────────────────────────────────
 
 export function calculateCostUsd(
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  source: "chat" | "identify_payee" | "n8n_categorize" = "chat"
 ): number {
-  const inputCost = (inputTokens / 1_000_000) * INPUT_PRICE_PER_1M;
-  const outputCost = (outputTokens / 1_000_000) * OUTPUT_PRICE_PER_1M;
-  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000; // 6 decimal precision
+  const isGemini = source === "chat" || source === "identify_payee";
+  const inputPrice  = isGemini ? GEMINI_FLASH_INPUT  : GPT4O_MINI_INPUT;
+  const outputPrice = isGemini ? GEMINI_FLASH_OUTPUT : GPT4O_MINI_OUTPUT;
+
+  const inputCost  = (inputTokens  / 1_000_000) * inputPrice;
+  const outputCost = (outputTokens / 1_000_000) * outputPrice;
+  return Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000;
 }
 
 export function usdToBrl(usd: number): number {
@@ -50,7 +58,7 @@ export function logTokenUsage(params: {
   totalTokens: number;
   conversationId?: string;
 }) {
-  const costUsd = calculateCostUsd(params.inputTokens, params.outputTokens);
+  const costUsd = calculateCostUsd(params.inputTokens, params.outputTokens, params.source);
 
   // Fire-and-forget — don't block the response
   db.insert(tokenUsage)

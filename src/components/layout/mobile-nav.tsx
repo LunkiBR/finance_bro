@@ -23,15 +23,15 @@ const mainItems = [
     { href: "/dashboard",  label: "Dashboard",  icon: LayoutDashboard },
     { href: "/transacoes", label: "Transações",  icon: List },
     { href: "/copiloto",   label: "Copiloto",    icon: MessageSquare, primary: true },
-    { href: "/orcamentos", label: "Orçamentos",  icon: PieChart },
+    { href: "/importar",   label: "Importar",    icon: Upload },
 ];
 
 const moreItems = [
     { href: "/categorias",    label: "Categorias",   icon: Tags },
+    { href: "/orcamentos",    label: "Orçamentos",   icon: PieChart },
     { href: "/metas",         label: "Metas",         icon: Target },
     { href: "/automacoes",    label: "Automações",    icon: Zap },
     { href: "/alertas",       label: "Alertas",       icon: Bell, badge: true },
-    { href: "/importar",      label: "Importar",      icon: Upload },
     { href: "/configuracoes", label: "Configurações", icon: Settings },
     { href: "/bem-vindo",     label: "Como usar",     icon: BookOpen },
 ];

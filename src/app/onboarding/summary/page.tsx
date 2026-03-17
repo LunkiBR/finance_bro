@@ -2,22 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronLeft } from "lucide-react";
 
 interface ProfileData {
     nome: string;
-    rendaMensal: string | null;
-    dividaMensal: string | null;
-    bancoPrincipal: string | null;
+    fotoBase64: string | null;
     objetivoPrincipal: string | null;
-    temReserva: string | null;
+    dividaMensal: string | null;
     categoriasAltas: string[];
 }
-
-const reservaLabels: Record<string, string> = {
-    sim: "Sim, completa",
-    parcial: "Parcialmente",
-    nao: "Ainda não",
-};
 
 export default function SummaryPage() {
     const router = useRouter();
@@ -54,34 +47,71 @@ export default function SummaryPage() {
     if (!profile) return null;
 
     const rows = [
-        { label: "Renda mensal", value: profile.rendaMensal ? `R$ ${profile.rendaMensal}` : "Não informada" },
-        { label: "Dívidas mensais", value: profile.dividaMensal ? `R$ ${profile.dividaMensal}` : "Nenhuma" },
-        { label: "Banco principal", value: profile.bancoPrincipal || "Não informado" },
         { label: "Objetivo", value: profile.objetivoPrincipal || "Não informado" },
-        { label: "Reserva atual", value: profile.temReserva ? reservaLabels[profile.temReserva] || profile.temReserva : "Não informada" },
+        { label: "Dívidas mensais", value: profile.dividaMensal ? `R$ ${profile.dividaMensal}` : "Nenhuma" },
         { label: "Maiores gastos", value: profile.categoriasAltas.join(", ") || "Nenhum selecionado" },
     ];
 
     return (
-        <div className="w-full max-w-[480px] px-6 animate-fade-up">
-            <h2 className="text-h2 mb-2" style={{ color: "var(--text-primary)" }}>
-                Pronto, {profile.nome}. Aqui está o que entendi:
-            </h2>
+        <div className="w-full max-w-[480px] animate-fade-up">
+            {/* Back */}
+            <button
+                onClick={() => router.push("/onboarding/profile")}
+                className="flex items-center gap-1 text-[13px] mb-8 transition-opacity hover:opacity-70"
+                style={{ color: "var(--text-muted)" }}
+            >
+                <ChevronLeft size={16} />
+                Voltar
+            </button>
 
+            {/* User identity */}
+            <div className="flex items-center gap-4 mb-8">
+                {profile.fotoBase64 ? (
+                    <img
+                        src={profile.fotoBase64}
+                        alt="Foto do perfil"
+                        className="w-14 h-14 rounded-full object-cover"
+                        style={{ border: "2px solid var(--border)" }}
+                    />
+                ) : (
+                    <div
+                        className="w-14 h-14 rounded-full flex items-center justify-center text-[20px]"
+                        style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)" }}
+                    >
+                        {profile.nome.charAt(0).toUpperCase()}
+                    </div>
+                )}
+                <div>
+                    <p className="text-h3" style={{ color: "var(--text-primary)" }}>{profile.nome}</p>
+                    <p className="text-caption" style={{ color: "var(--text-muted)" }}>Tudo certo!</p>
+                </div>
+            </div>
+
+            <h2 className="text-h2 mb-1" style={{ color: "var(--text-primary)" }}>
+                Aqui está o que eu sei sobre você
+            </h2>
+            <p className="text-body mb-6" style={{ color: "var(--text-secondary)" }}>
+                Confirme e vamos começar.
+            </p>
+
+            {/* Summary card */}
             <div
-                className="mt-6 rounded-[6px] border overflow-hidden"
+                className="rounded-[8px] border overflow-hidden mb-6"
                 style={{ borderColor: "var(--border)" }}
             >
                 {rows.map((row, i) => (
                     <div
                         key={row.label}
-                        className="flex justify-between items-center px-4 py-3 text-[13px]"
+                        className="flex justify-between items-start gap-4 px-4 py-4 text-[13px]"
                         style={{
                             borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none",
                         }}
                     >
-                        <span style={{ color: "var(--text-secondary)" }}>{row.label}</span>
-                        <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+                        <span style={{ color: "var(--text-muted)" }}>{row.label}</span>
+                        <span
+                            className="text-right"
+                            style={{ color: "var(--text-primary)", fontWeight: 500, maxWidth: "60%" }}
+                        >
                             {row.value}
                         </span>
                     </div>
@@ -89,27 +119,24 @@ export default function SummaryPage() {
             </div>
 
             <p
-                className="text-caption mt-4"
+                className="text-caption mb-8"
                 style={{ color: "var(--text-muted)", lineHeight: "1.5" }}
             >
-                Vou usar isso para personalizar minha análise. Você pode atualizar
-                qualquer informação depois.
+                Você pode editar qualquer informação depois nas configurações.
             </p>
 
-            <div className="mt-8 flex justify-end">
-                <button
-                    onClick={handleConfirm}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 px-6 py-[10px] rounded-[6px] text-[14px] transition-opacity disabled:opacity-50"
-                    style={{
-                        background: "var(--text-primary)",
-                        color: "var(--bg-base)",
-                        fontWeight: 590,
-                    }}
-                >
-                    {saving ? "Salvando..." : "Entrar no Finance Friend →"}
-                </button>
-            </div>
+            <button
+                onClick={handleConfirm}
+                disabled={saving}
+                className="w-full py-[14px] rounded-[8px] text-[15px] transition-all disabled:opacity-50 active:scale-[0.98]"
+                style={{
+                    background: "var(--text-primary)",
+                    color: "var(--bg-base)",
+                    fontWeight: 590,
+                }}
+            >
+                {saving ? "Salvando..." : "Entrar no Finance Friend →"}
+            </button>
         </div>
     );
 }

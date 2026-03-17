@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { MonthSelector } from "@/components/transactions/month-selector";
-import { getCurrentMonth, formatBRL } from "@/lib/utils";
-import { Cpu, DollarSign, Zap, Users, TrendingUp, BarChart2 } from "lucide-react";
+import { getCurrentMonth } from "@/lib/utils";
+import { DollarSign, Zap, Users, TrendingUp, BarChart2, Cpu } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -68,31 +68,29 @@ interface TokenData {
   };
   perUser: PerUser[];
   dailyBreakdown: DailyPoint[];
-  recentCalls: {
-    id: string;
-    userId: string;
-    userName: string | null;
-    source: string;
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    costUsd: string;
-    costBrl: string;
-    createdAt: string;
-  }[];
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  chat: "Chat",
+  chat: "Copiloto",
   identify_payee: "Payee ID",
   n8n_categorize: "Categorização",
 };
 
 const SOURCE_COLOR: Record<string, string> = {
-  chat: "bg-blue-500",
-  identify_payee: "bg-purple-500",
-  n8n_categorize: "bg-amber-500",
+  chat: "#7C3AED",
+  identify_payee: "#8B5CF6",
+  n8n_categorize: "#F59E0B",
 };
+
+const SOURCE_MODEL: Record<string, string> = {
+  chat: "Gemini 2.5 Flash",
+  identify_payee: "Gemini 2.5 Flash",
+  n8n_categorize: "GPT-4o mini",
+};
+
+function fmtNum(n: number) {
+  return n.toLocaleString("pt-BR");
+}
 
 export default function TokenUsagePage() {
   const [month, setMonth] = useState(getCurrentMonth());
@@ -113,113 +111,118 @@ export default function TokenUsagePage() {
       .finally(() => setLoading(false));
   }, [month]);
 
-  if (error) {
-    return <div className="p-6 text-red-500">{error}</div>;
-  }
+  if (error) return <div className="p-6" style={{ color: "var(--accent-red)" }}>{error}</div>;
 
-  const maxUserCost = data
-    ? Math.max(...data.perUser.map((u) => parseFloat(u.costBrl)), 0.0001)
-    : 1;
+  const maxUserCost = data ? Math.max(...data.perUser.map((u) => parseFloat(u.costBrl)), 0.0001) : 1;
+
+  // Compute total spend from daily data (for the chart label)
+  const totalSpend = data ? parseFloat(data.grandTotal.costBrl) : 0;
 
   return (
-    <div className="space-y-6 p-6">
+    <div
+      className="space-y-6 p-4 sm:p-6 max-w-[900px]"
+      style={{ color: "var(--text-primary)" }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Uso de Tokens</h1>
-          <p className="text-muted-foreground text-sm">
-            Custo de AI por usuário · Gemini 2.5 Flash
+          <h1 className="text-h2">Uso de Tokens</h1>
+          <p className="text-caption mt-0.5" style={{ color: "var(--text-muted)" }}>
+            Custo de IA por usuário · Gemini 2.5 Flash + GPT-4o mini
           </p>
         </div>
         <MonthSelector month={month} onChange={setMonth} />
       </div>
 
       {loading ? (
-        <div className="text-muted-foreground py-20 text-center">Carregando...</div>
+        /* ── Skeleton ── */
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <div
+                key={i}
+                className="rounded-[10px] border p-4 h-20 animate-pulse"
+                style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
+              />
+            ))}
+          </div>
+          <div
+            className="rounded-[10px] border p-4 h-52 animate-pulse"
+            style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
+          />
+        </div>
       ) : data ? (
         <>
-          {/* ── KPI row 1: totals ── */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {/* ── KPI row ── */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <KpiCard
-              icon={<DollarSign className="h-4 w-4" />}
+              icon={<DollarSign size={15} />}
               label="Custo Total"
               value={`R$ ${data.grandTotal.costBrl}`}
               sub={`$ ${parseFloat(data.grandTotal.costUsd).toFixed(4)}`}
+              accent
+            />
+            {data.isCurrentMonth && (
+              <KpiCard
+                icon={<TrendingUp size={15} />}
+                label="Projeção do Mês"
+                value={`R$ ${data.saasMetrics.projectedCostBrl}`}
+                sub={`$ ${data.saasMetrics.projectedCostUsd}`}
+              />
+            )}
+            <KpiCard
+              icon={<Zap size={15} />}
+              label="Chamadas AI"
+              value={fmtNum(data.grandTotal.callCount)}
+              sub={`Ø ${fmtNum(data.saasMetrics.avgTokensPerCall)} tok/chamada`}
             />
             <KpiCard
-              icon={<Cpu className="h-4 w-4" />}
+              icon={<Users size={15} />}
+              label="Usuários Ativos"
+              value={data.grandTotal.activeUsers.toString()}
+              sub={`R$ ${data.saasMetrics.avgCostPerUserBrl} /usuário`}
+            />
+            <KpiCard
+              icon={<Cpu size={15} />}
               label="Total Tokens"
               value={fmtNum(data.grandTotal.totalTokens)}
               sub={`${fmtNum(data.grandTotal.inputTokens)} in / ${fmtNum(data.grandTotal.outputTokens)} out`}
             />
-            <KpiCard
-              icon={<Zap className="h-4 w-4" />}
-              label="Chamadas AI"
-              value={fmtNum(data.grandTotal.callCount)}
-            />
-            <KpiCard
-              icon={<Users className="h-4 w-4" />}
-              label="Usuários Ativos"
-              value={data.grandTotal.activeUsers.toString()}
-            />
-            <KpiCard
-              icon={<BarChart2 className="h-4 w-4" />}
-              label="Custo Médio/Usuário"
-              value={`R$ ${data.saasMetrics.avgCostPerUserBrl}`}
-              sub={`$ ${parseFloat(data.saasMetrics.avgCostPerUserUsd).toFixed(4)}`}
-              highlight
-            />
-            {data.isCurrentMonth && (
-              <KpiCard
-                icon={<TrendingUp className="h-4 w-4" />}
-                label="Projeção do Mês"
-                value={`R$ ${data.saasMetrics.projectedCostBrl}`}
-                sub={`$ ${data.saasMetrics.projectedCostUsd}`}
-                highlight
-              />
-            )}
           </div>
 
-          {/* ── KPI row 2: per-call metrics ── */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <MetricBox
-              label="Custo médio por chamada"
-              value={`R$ ${data.saasMetrics.avgCostPerCallBrl}`}
-              sub={`$ ${parseFloat(data.saasMetrics.avgCostPerCallUsd).toFixed(6)}`}
-            />
-            <MetricBox
-              label="Tokens médios por chamada"
-              value={fmtNum(data.saasMetrics.avgTokensPerCall)}
-            />
-            <MetricBox
-              label="Câmbio usado"
-              value={`1 USD = R$ ${data.usdToBrl}`}
-              sub="Fixo · Gemini 2.5 Flash"
-            />
-          </div>
-
-          {/* ── Daily cost chart ── */}
-          <div className="rounded-xl border bg-card p-4">
-            <h2 className="mb-4 font-semibold">Custo diário (BRL)</h2>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={data.dailyBreakdown} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          {/* ── Daily cost chart (OpenAI-style) ── */}
+          <div
+            className="rounded-[10px] border p-5"
+            style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
+          >
+            <div className="flex items-start justify-between mb-1">
+              <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Total Spend</p>
+            </div>
+            <p className="text-[24px] font-semibold mb-4">
+              R$ {totalSpend.toFixed(2)}
+              <span className="text-[13px] font-normal ml-2" style={{ color: "var(--text-muted)" }}>
+                ${parseFloat(data.grandTotal.costUsd).toFixed(4)} USD
+              </span>
+            </p>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={data.dailyBreakdown} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis
                   dataKey="day"
                   tickFormatter={(d) => {
                     const day = parseInt(d.split("-")[2]);
                     return day % 5 === 1 || day === 1 ? String(day) : "";
                   }}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
                   tickFormatter={(v) => `R$${v.toFixed(2)}`}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  tick={{ fontSize: 10, fill: "var(--text-muted)" }}
                   axisLine={false}
                   tickLine={false}
-                  width={55}
+                  width={50}
                 />
                 <Tooltip
                   formatter={(v: number | undefined) => [`R$ ${(v ?? 0).toFixed(4)}`, "Custo"]}
@@ -228,163 +231,140 @@ export default function TokenUsagePage() {
                     return `Dia ${parseInt(d)}`;
                   }}
                   contentStyle={{
-                    background: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border)",
                     borderRadius: 8,
                     fontSize: 12,
+                    color: "var(--text-primary)",
                   }}
                 />
-                <Bar dataKey="costBrl" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="costBrl" fill="#7C3AED" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+
+            {/* Source legend */}
+            <div className="flex flex-wrap gap-3 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+              {Object.entries(SOURCE_LABEL).map(([src, label]) => (
+                <div key={src} className="flex items-center gap-1.5">
+                  <span
+                    className="w-2 h-2 rounded-sm"
+                    style={{ background: SOURCE_COLOR[src] }}
+                  />
+                  <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                    {label}
+                    <span className="ml-1 opacity-60">({SOURCE_MODEL[src]})</span>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* ── Per-user table with visual bars ── */}
-          <div className="rounded-xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Custo por Usuário</h2>
-              <p className="text-muted-foreground text-xs mt-0.5">Ordenado por custo decrescente</p>
+          {/* ── Per-user breakdown ── */}
+          <div
+            className="rounded-[10px] border overflow-hidden"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <div
+              className="px-5 py-4 border-b"
+              style={{ borderColor: "var(--border)", background: "var(--bg-surface)" }}
+            >
+              <h2 className="text-[14px] font-medium">Custo por usuário</h2>
+              <p className="text-[12px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                Ordenado por custo decrescente
+              </p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-4 py-2">Usuário</th>
-                    <th className="px-4 py-2">Proporção</th>
-                    <th className="px-4 py-2 text-right">Tokens</th>
-                    <th className="px-4 py-2 text-right">Chamadas</th>
-                    <th className="px-4 py-2 text-right">Tok/chamada</th>
-                    <th className="px-4 py-2 text-right">Custo (USD)</th>
-                    <th className="px-4 py-2 text-right">Custo (BRL)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.perUser.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                        Nenhum uso registrado neste período.
-                      </td>
-                    </tr>
-                  ) : (
-                    data.perUser.map((u) => {
-                      const pct = (parseFloat(u.costBrl) / maxUserCost) * 100;
-                      const chatTokens = u.sources["chat"]?.tokens ?? 0;
-                      const payeeTokens = u.sources["identify_payee"]?.tokens ?? 0;
-                      const chatPct = u.totalTokens > 0 ? (chatTokens / u.totalTokens) * 100 : 0;
-                      const payeePct = u.totalTokens > 0 ? (payeeTokens / u.totalTokens) * 100 : 0;
-                      return (
-                        <tr key={u.userId} className="border-b last:border-0">
-                          <td className="px-4 py-3 font-medium">
-                            {u.userName || u.username}
-                            {/* Source pills */}
-                            <div className="mt-1 flex gap-1 flex-wrap">
-                              {Object.entries(u.sources).map(([src, v]) => (
-                                <span
-                                  key={src}
-                                  className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                                >
-                                  <span className={`h-1.5 w-1.5 rounded-full ${SOURCE_COLOR[src] ?? "bg-gray-400"}`} />
-                                  {SOURCE_LABEL[src] ?? src}: {v.calls}x
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 min-w-[120px]">
-                            {/* Cost bar */}
-                            <div className="h-2 w-full rounded-full bg-muted overflow-hidden mb-1">
-                              <div
-                                className="h-full rounded-full bg-primary transition-all"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            {/* Token source breakdown */}
-                            {u.totalTokens > 0 && (
-                              <div className="flex h-1 w-full overflow-hidden rounded-full">
-                                <div className="bg-blue-500" style={{ width: `${chatPct}%` }} />
-                                <div className="bg-purple-500" style={{ width: `${payeePct}%` }} />
-                                <div className="bg-muted flex-1" />
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
-                            {fmtNum(u.totalTokens)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">{u.callCount}</td>
-                          <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                            {fmtNum(u.avgTokensPerCall)}
-                          </td>
-                          <td className="px-4 py-3 text-right tabular-nums">
+            {data.perUser.length === 0 ? (
+              <div className="px-5 py-10 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
+                Nenhum uso registrado neste período.
+              </div>
+            ) : (
+              <div className="divide-y" style={{ background: "var(--bg-surface)" }}>
+                {data.perUser.map((u) => {
+                  const pct = (parseFloat(u.costBrl) / maxUserCost) * 100;
+                  const chatCalls = u.sources["chat"]?.calls ?? 0;
+                  const categCalls = u.sources["n8n_categorize"]?.calls ?? 0;
+                  return (
+                    <div
+                      key={u.userId}
+                      className="px-5 py-4"
+                      style={{ borderColor: "var(--border)" }}
+                    >
+                      {/* Name row */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-medium shrink-0"
+                            style={{
+                              background: "rgba(124,58,237,0.15)",
+                              color: "#7C3AED",
+                              border: "1px solid rgba(124,58,237,0.2)",
+                            }}
+                          >
+                            {(u.userName || u.username)[0].toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-[13px] font-medium">{u.userName || u.username}</p>
+                            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                              {u.callCount} chamadas · {fmtNum(u.totalTokens)} tokens
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[14px] font-semibold">
+                            R$ {parseFloat(u.costBrl).toFixed(2)}
+                          </p>
+                          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                             ${parseFloat(u.costUsd).toFixed(4)}
-                          </td>
-                          <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                            {formatBRL(parseFloat(u.costBrl))}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Cost bar */}
+                      <div
+                        className="h-1.5 rounded-full overflow-hidden mb-2"
+                        style={{ background: "var(--bg-elevated)" }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${pct}%`,
+                            background: "linear-gradient(to right, #7C3AED, #8B5CF6)",
+                          }}
+                        />
+                      </div>
+
+                      {/* Source pills */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(u.sources).map(([src, v]) => (
+                          <span
+                            key={src}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px]"
+                            style={{
+                              background: `${SOURCE_COLOR[src]}15`,
+                              color: SOURCE_COLOR[src],
+                              border: `1px solid ${SOURCE_COLOR[src]}30`,
+                            }}
+                          >
+                            <span
+                              className="w-1.5 h-1.5 rounded-full"
+                              style={{ background: SOURCE_COLOR[src] }}
+                            />
+                            {SOURCE_LABEL[src] ?? src}: {v.calls}x
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* ── Recent calls ── */}
-          <div className="rounded-xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Chamadas Recentes</h2>
-              <p className="text-muted-foreground text-xs mt-0.5">Últimas 30 do período</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-4 py-2">Usuário</th>
-                    <th className="px-4 py-2">Tipo</th>
-                    <th className="px-4 py-2 text-right">In</th>
-                    <th className="px-4 py-2 text-right">Out</th>
-                    <th className="px-4 py-2 text-right">Total</th>
-                    <th className="px-4 py-2 text-right">Custo (BRL)</th>
-                    <th className="px-4 py-2 text-right">Data</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.recentCalls.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0">
-                      <td className="px-4 py-2">{c.userName || "—"}</td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            c.source === "chat"
-                              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                              : c.source === "identify_payee"
-                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                          }`}
-                        >
-                          {SOURCE_LABEL[c.source] ?? c.source}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                        {fmtNum(c.inputTokens)}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                        {fmtNum(c.outputTokens)}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums">{fmtNum(c.totalTokens)}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">R$ {c.costBrl}</td>
-                      <td className="px-4 py-2 text-right text-muted-foreground">
-                        {new Date(c.createdAt).toLocaleString("pt-BR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {/* ── Stats row (câmbio, custo/chamada) ── */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatBox label="Custo médio/chamada" value={`R$ ${data.saasMetrics.avgCostPerCallBrl}`} sub={`$ ${parseFloat(data.saasMetrics.avgCostPerCallUsd).toFixed(6)}`} />
+            <StatBox label="Tokens médios/chamada" value={fmtNum(data.saasMetrics.avgTokensPerCall)} />
+            <StatBox label="Câmbio" value={`1 USD = R$ ${data.usdToBrl}`} sub="Fixo" />
           </div>
         </>
       ) : null}
@@ -392,43 +372,52 @@ export default function TokenUsagePage() {
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtNum(n: number) {
-  return n.toLocaleString("pt-BR");
-}
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function KpiCard({
-  icon,
-  label,
-  value,
-  sub,
-  highlight,
+  icon, label, value, sub, accent,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   sub?: string;
-  highlight?: boolean;
+  accent?: boolean;
 }) {
   return (
-    <div className={`rounded-xl border p-4 ${highlight ? "border-primary/30 bg-primary/5" : "bg-card"}`}>
-      <div className="flex items-center gap-2 text-muted-foreground">
+    <div
+      className="rounded-[10px] border p-4"
+      style={{
+        background: accent ? "rgba(124,58,237,0.08)" : "var(--bg-surface)",
+        borderColor: accent ? "rgba(124,58,237,0.25)" : "var(--border)",
+      }}
+    >
+      <div className="flex items-center gap-1.5 mb-2" style={{ color: accent ? "#7C3AED" : "var(--text-muted)" }}>
         {icon}
-        <span className="text-xs">{label}</span>
+        <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
       </div>
-      <p className="mt-1 text-xl font-bold">{value}</p>
-      {sub && <p className="text-muted-foreground text-xs mt-0.5">{sub}</p>}
+      <p className="text-[18px] font-semibold leading-tight" style={{ color: "var(--text-primary)" }}>
+        {value}
+      </p>
+      {sub && (
+        <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+          {sub}
+        </p>
+      )}
     </div>
   );
 }
 
-function MetricBox({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatBox({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border bg-card px-4 py-3">
-      <p className="text-muted-foreground text-xs">{label}</p>
-      <p className="mt-0.5 text-lg font-semibold">{value}</p>
-      {sub && <p className="text-muted-foreground text-xs">{sub}</p>}
+    <div
+      className="rounded-[10px] border px-4 py-3"
+      style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
+    >
+      <p className="text-[11px] uppercase tracking-wide font-medium mb-1" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </p>
+      <p className="text-[15px] font-semibold">{value}</p>
+      {sub && <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sub}</p>}
     </div>
   );
 }

@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { UserPlus, Shield, User, Trash2, CheckCircle, Clock, Ban, RefreshCw } from "lucide-react";
+import {
+  UserPlus, Shield, User, Trash2, CheckCircle,
+  Clock, Ban, RefreshCw, ChevronDown, ChevronUp
+} from "lucide-react";
 
 interface UserRow {
   id: string;
@@ -15,11 +18,16 @@ interface UserRow {
   createdAt: string;
 }
 
-const STATUS_LABEL: Record<string, string> = { active: "Ativo", pending: "Pendente", suspended: "Suspenso" };
-const STATUS_ICON: Record<string, React.ReactNode> = {
-  active: <CheckCircle className="h-3.5 w-3.5 text-green-500" />,
-  pending: <Clock className="h-3.5 w-3.5 text-amber-500" />,
-  suspended: <Ban className="h-3.5 w-3.5 text-red-500" />,
+const STATUS_LABEL: Record<string, string> = {
+  active: "Ativo",
+  pending: "Pendente",
+  suspended: "Suspenso",
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  active: "var(--accent-green)",
+  pending: "#F59E0B",
+  suspended: "var(--accent-red)",
 };
 
 export default function UsuariosPage() {
@@ -31,6 +39,8 @@ export default function UsuariosPage() {
   const [form, setForm] = useState({ name: "", username: "", email: "", password: "", role: "user" });
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -59,6 +69,17 @@ export default function UsuariosPage() {
     load();
   };
 
+  const approveUser = async (user: UserRow) => {
+    setApprovingId(user.id);
+    await fetch(`/api/admin/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "active" }),
+    });
+    setApprovingId(null);
+    load();
+  };
+
   const toggleStatus = async (user: UserRow) => {
     const next = user.status === "active" ? "suspended" : "active";
     await fetch(`/api/admin/users/${user.id}`, {
@@ -77,87 +98,98 @@ export default function UsuariosPage() {
     load();
   };
 
+  const pending = users.filter((u) => u.status === "pending");
+  const others = users.filter((u) => u.status !== "pending");
+
   return (
-    <div className="space-y-6 p-6">
+    <div className="max-w-[640px] mx-auto px-4 py-6 pb-24 space-y-6" style={{ color: "var(--text-primary)" }}>
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Usuários</h1>
-          <p className="text-muted-foreground text-sm">{users.length} cadastrado{users.length !== 1 ? "s" : ""}</p>
+          <h1 className="text-h2">Usuários</h1>
+          <p className="text-caption mt-0.5" style={{ color: "var(--text-muted)" }}>
+            {users.length} cadastrado{users.length !== 1 ? "s" : ""}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={load}
-            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-[8px] border text-[13px] transition-opacity hover:opacity-70"
+            style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Atualizar
+            <RefreshCw size={14} />
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-medium transition-opacity hover:opacity-90"
+            style={{ background: "var(--text-primary)", color: "var(--bg-base)" }}
           >
-            <UserPlus className="h-4 w-4" />
-            Novo usuário
+            <UserPlus size={14} />
+            Novo
           </button>
         </div>
       </div>
 
       {/* Create form */}
       {showForm && (
-        <form onSubmit={handleCreate} className="rounded-xl border bg-card p-4 space-y-3">
-          <h2 className="font-semibold text-sm">Criar novo usuário</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              placeholder="Nome completo"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <input
-              placeholder="Username *"
-              required
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <input
-              type="email"
-              placeholder="Email *"
-              required
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <input
-              type="password"
-              placeholder="Senha (mín. 8 chars) *"
-              required
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-            />
+        <form
+          onSubmit={handleCreate}
+          className="rounded-[10px] border p-4 space-y-3"
+          style={{ background: "var(--bg-surface)", borderColor: "var(--border)" }}
+        >
+          <h2 className="text-[13px] font-medium">Criar novo usuário</h2>
+          <div className="flex flex-col gap-2">
+            {[
+              { placeholder: "Nome completo", key: "name", type: "text", required: false },
+              { placeholder: "Username *", key: "username", type: "text", required: true },
+              { placeholder: "Email *", key: "email", type: "email", required: true },
+              { placeholder: "Senha (mín. 8 chars) *", key: "password", type: "password", required: true },
+            ].map((f) => (
+              <input
+                key={f.key}
+                type={f.type}
+                placeholder={f.placeholder}
+                required={f.required}
+                value={form[f.key as keyof typeof form]}
+                onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-[8px] border text-[13px]"
+                style={{
+                  background: "var(--bg-elevated)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-primary)",
+                  fontSize: "16px",
+                }}
+              />
+            ))}
             <select
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
-              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full px-3 py-2.5 rounded-[8px] border text-[13px]"
+              style={{
+                background: "var(--bg-elevated)",
+                borderColor: "var(--border)",
+                color: "var(--text-primary)",
+              }}
             >
               <option value="user">Usuário</option>
               <option value="admin">Admin</option>
             </select>
           </div>
-          {formError && <p className="text-red-500 text-xs">{formError}</p>}
+          {formError && <p className="text-[12px]" style={{ color: "var(--accent-red)" }}>{formError}</p>}
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={saving}
-              className="rounded-lg bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              className="flex-1 py-2.5 rounded-[8px] text-[13px] font-medium transition-opacity disabled:opacity-50"
+              style={{ background: "var(--text-primary)", color: "var(--bg-base)" }}
             >
-              {saving ? "Criando..." : "Criar"}
+              {saving ? "Criando..." : "Criar usuário"}
             </button>
             <button
               type="button"
               onClick={() => { setShowForm(false); setFormError(null); }}
-              className="rounded-lg border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted transition-colors"
+              className="px-4 py-2.5 rounded-[8px] border text-[13px] transition-opacity hover:opacity-70"
+              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
             >
               Cancelar
             </button>
@@ -165,103 +197,193 @@ export default function UsuariosPage() {
         </form>
       )}
 
-      {/* Users table */}
-      <div className="rounded-xl border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="px-4 py-3">Usuário</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Papel</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Criado em</th>
-                <th className="px-4 py-3 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Carregando...</td>
-                </tr>
-              ) : users.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Nenhum usuário encontrado.</td>
-                </tr>
-              ) : (
-                users.map((u) => {
+      {loading ? (
+        <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>Carregando...</div>
+      ) : (
+        <>
+          {/* ── Pending approvals (priority section) ── */}
+          {pending.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Clock size={14} style={{ color: "#F59E0B" }} />
+                <h2 className="text-[13px] font-medium" style={{ color: "#F59E0B" }}>
+                  Aguardando aprovação ({pending.length})
+                </h2>
+              </div>
+              <div className="flex flex-col gap-3">
+                {pending.map((u) => {
                   const isSelf = u.id === session?.user?.id;
                   return (
-                    <tr key={u.id} className="border-b last:border-0">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          {u.avatarUrl ? (
-                            <img src={u.avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
-                          ) : (
-                            <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
-                              {(u.name || u.username)[0].toUpperCase()}
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium">{u.name || u.username}</p>
-                            <p className="text-muted-foreground text-xs">@{u.username}</p>
-                          </div>
-                          {isSelf && (
-                            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary font-medium">você</span>
-                          )}
+                    <div
+                      key={u.id}
+                      className="rounded-[10px] border p-4"
+                      style={{
+                        background: "rgba(245,158,11,0.05)",
+                        borderColor: "rgba(245,158,11,0.3)",
+                      }}
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-[14px] font-medium shrink-0"
+                          style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                        >
+                          {(u.name || u.username)[0].toUpperCase()}
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-                          u.role === "admin"
-                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                            : "bg-muted text-muted-foreground"
-                        }`}>
-                          {u.role === "admin" ? <Shield className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                          {u.role === "admin" ? "Admin" : "Usuário"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 text-xs">
-                          {STATUS_ICON[u.status]}
-                          {STATUS_LABEL[u.status]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {new Date(u.createdAt).toLocaleDateString("pt-BR")}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {!isSelf && (
-                            <>
-                              <button
-                                onClick={() => toggleStatus(u)}
-                                title={u.status === "active" ? "Suspender" : "Ativar"}
-                                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
-                              >
-                                {u.status === "active" ? <Ban className="h-3.5 w-3.5" /> : <CheckCircle className="h-3.5 w-3.5" />}
-                              </button>
-                              <button
-                                onClick={() => handleDelete(u.id)}
-                                disabled={deletingId === u.id}
-                                title="Deletar"
-                                className="rounded-md p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </>
-                          )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[14px] font-medium truncate">{u.name || u.username}</p>
+                          <p className="text-[12px] truncate" style={{ color: "var(--text-muted)" }}>
+                            @{u.username} · {u.email}
+                          </p>
                         </div>
-                      </td>
-                    </tr>
+                      </div>
+                      {!isSelf && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => approveUser(u)}
+                            disabled={approvingId === u.id}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[8px] text-[13px] font-medium transition-opacity disabled:opacity-50"
+                            style={{ background: "var(--accent-green)", color: "#fff" }}
+                          >
+                            <CheckCircle size={14} />
+                            {approvingId === u.id ? "Aprovando..." : "Aprovar"}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(u.id)}
+                            disabled={deletingId === u.id}
+                            className="px-4 py-2.5 rounded-[8px] border text-[13px] transition-opacity hover:opacity-70 disabled:opacity-50"
+                            style={{ borderColor: "var(--border)", color: "var(--accent-red)" }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
-                })
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* ── All other users ── */}
+          {others.length > 0 && (
+            <section>
+              {pending.length > 0 && (
+                <h2 className="text-[13px] font-medium mb-3" style={{ color: "var(--text-muted)" }}>
+                  Usuários ativos
+                </h2>
               )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              <div
+                className="rounded-[10px] border overflow-hidden"
+                style={{ borderColor: "var(--border)" }}
+              >
+                {others.map((u, idx) => {
+                  const isSelf = u.id === session?.user?.id;
+                  const isExpanded = expandedId === u.id;
+                  return (
+                    <div
+                      key={u.id}
+                      style={{
+                        borderBottom: idx < others.length - 1 ? "1px solid var(--border)" : "none",
+                      }}
+                    >
+                      {/* Row header */}
+                      <button
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors"
+                        style={{ background: isExpanded ? "var(--bg-elevated)" : "var(--bg-surface)" }}
+                        onClick={() => setExpandedId(isExpanded ? null : u.id)}
+                      >
+                        {u.avatarUrl ? (
+                          <img src={u.avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-medium shrink-0"
+                            style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                          >
+                            {(u.name || u.username)[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="flex items-center gap-2">
+                            <p className="text-[13px] font-medium truncate">{u.name || u.username}</p>
+                            {isSelf && (
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                                style={{ background: "rgba(247,248,248,0.1)", color: "var(--text-muted)" }}
+                              >
+                                você
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span
+                              className="text-[11px]"
+                              style={{ color: STATUS_COLOR[u.status] }}
+                            >
+                              {STATUS_LABEL[u.status]}
+                            </span>
+                            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>·</span>
+                            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                              {u.role === "admin" ? "Admin" : "Usuário"}
+                            </span>
+                          </div>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronUp size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        ) : (
+                          <ChevronDown size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        )}
+                      </button>
+
+                      {/* Expanded actions */}
+                      {isExpanded && !isSelf && (
+                        <div
+                          className="px-4 pb-4 pt-2 flex flex-col gap-2"
+                          style={{ background: "var(--bg-elevated)" }}
+                        >
+                          <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>{u.email}</p>
+                          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                            Criado em {new Date(u.createdAt).toLocaleDateString("pt-BR")}
+                          </p>
+                          <div className="flex gap-2 mt-1">
+                            <button
+                              onClick={() => toggleStatus(u)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[8px] border text-[13px] font-medium transition-opacity hover:opacity-80"
+                              style={{
+                                borderColor: u.status === "active" ? "var(--accent-red)" : "var(--accent-green)",
+                                color: u.status === "active" ? "var(--accent-red)" : "var(--accent-green)",
+                              }}
+                            >
+                              {u.status === "active" ? (
+                                <><Ban size={13} /> Suspender</>
+                              ) : (
+                                <><CheckCircle size={13} /> Reativar</>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(u.id)}
+                              disabled={deletingId === u.id}
+                              className="px-4 py-2.5 rounded-[8px] border text-[13px] transition-opacity hover:opacity-70 disabled:opacity-50"
+                              style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {users.length === 0 && (
+            <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
+              Nenhum usuário encontrado.
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

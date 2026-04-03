@@ -4,6 +4,7 @@ services:
   finance-app:
     build: .
     restart: always
+    env_file: .env.local
     networks:
       - root_default
     labels:
